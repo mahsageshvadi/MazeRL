@@ -5,10 +5,12 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:1
-#SBATCH --mem=32GB
+#SBATCH --gres=gpu:h200:1
+#SBATCH --partition=dg
+#SBATCH --account=fdf.d
+#SBATCH --mem=100G
 #SBATCH --time=48:00:00
-#SBATCH --partition=gpu
+
 
 # Load modules (adjust for your cluster)
 module purge

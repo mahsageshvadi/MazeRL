@@ -19,7 +19,6 @@ module load cuda/11.8
 module load python/3.9
 
 # Activate environment
-source ~/miniconda3/bin/activate maze_drl
 
 # Create directories
 mkdir -p models logs results
@@ -34,7 +33,7 @@ SAVE_INTERVAL=2000
 LOG_INTERVAL=100
 
 # Run training
-python train_drl.py \
+python cluster_drl_training.py \
     --algorithm $ALGORITHM \
     --episodes $EPISODES \
     --min_size $MIN_SIZE \

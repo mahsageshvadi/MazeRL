@@ -9,7 +9,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --partition=pomplun
 #SBATCH --gres=gpu:h200:1
-#SBATCH --account=fdf.d
+#SBATCH --account=cs_funda.durupinarbabur
 
 
 
@@ -19,7 +19,6 @@ module load cuda/11.8
 module load python/3.9
 
 # Activate environment
-source ~/miniconda3/bin/activate maze_drl
 
 # Create directories
 mkdir -p models logs results

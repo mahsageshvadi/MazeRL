@@ -298,13 +298,13 @@ def print_maze_with_path(maze, path):
 # Main
 # =========================
 if __name__ == "__main__":
-    set_seeds(42)
+   # set_seeds(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Train on random mazes (7x7). You can later vary sizes at eval time.
     policy, _ = train_dqn(
         episodes=5000,        # increase (e.g., 5000+) for stronger policy
-        maze_size=(7,7),
+        maze_size=(20,20),
         wall_frac=0.25,
         gamma=0.99,
         lr=1e-3,

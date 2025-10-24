@@ -144,25 +144,26 @@ class MazeEnv:
 # DQN Model (size-agnostic via GAP)
 # =========================
 class DQNCNN(nn.Module):
-    def __init__(self, n_actions):
+    def __init__(self, n_actions, in_ch=3):
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(3, 32, 3, padding=1), nn.ReLU(),
-            nn.Conv2d(32, 64, 3, padding=1), nn.ReLU(),
-            nn.Conv2d(64, 64, 3, padding=1), nn.ReLU(),
+            nn.Conv2d(in_ch, 32, 3, padding=1), nn.ReLU(),
+            nn.Conv2d(32, 64, 3, padding=1),    nn.ReLU(),
+            nn.Conv2d(64, 64, 3, padding=1),    nn.ReLU(),
         )
-        # keep spatial info at a fixed resolution
-        self.down = nn.AdaptiveAvgPool2d((8, 8))  # size-agnostic in, fixed out
+        # use adaptive pooling to keep it size-agnostic
+        self.squash = nn.AdaptiveAvgPool2d((8, 8))
         self.head = nn.Sequential(
-            nn.Flatten(),              # 64*8*8 = 4096 features
+            nn.Flatten(),
             nn.Linear(64*8*8, 256), nn.ReLU(),
             nn.Linear(256, n_actions),
         )
 
     def forward(self, x):
-        z = self.conv(x)
-        z = self.down(z)
-        return self.head(z)
+        z = self.conv(x)        # (B,64,H,W)
+        z = self.squash(z)      # (B,64,8,8)
+        return self.head(z)     # (B,n_actions)
+
 
 # =========================
 # Replay Buffer
@@ -206,11 +207,13 @@ def train_dqn(
     print_every=100,
     device="cpu"
 ):
-    env = MazeEnv(rows=maze_size[0], cols=maze_size[1], wall_frac=wall_frac)
-    n_actions = 4
 
-    policy = DQNCNN(n_actions).to(device)
-    target = DQNCNN(n_actions).to(device)
+    env = MazeEnv(rows=maze_size[0], cols=maze_size[1], wall_frac=wall_frac)
+    obs = env.reset()
+    in_ch = obs.shape[0]  # 3 (no coord) or 5 (with coord)
+
+    policy = DQNCNN(n_actions=4, in_ch=in_ch).to(device)
+    target = DQNCNN(n_actions=4, in_ch=in_ch).to(device)
     target.load_state_dict(policy.state_dict())
     target.eval()
 

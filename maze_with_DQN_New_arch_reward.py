@@ -210,10 +210,11 @@ def train_dqn(
 
     env = MazeEnv(rows=maze_size[0], cols=maze_size[1], wall_frac=wall_frac)
     obs = env.reset()
-    in_ch = obs.shape[0]  # 3 (no coord) or 5 (with coord)
+    in_ch = obs.shape[0]         # number of channels (3 or 5)
+    n_actions = len(MazeEnv.ACTIONS)  # ← ADD THIS LINE
 
-    policy = DQNCNN(n_actions=4, in_ch=in_ch).to(device)
-    target = DQNCNN(n_actions=4, in_ch=in_ch).to(device)
+    policy = DQNCNN(n_actions, in_ch=in_ch).to(device)
+    target = DQNCNN(n_actions, in_ch=in_ch).to(device)
     target.load_state_dict(policy.state_dict())
     target.eval()
 

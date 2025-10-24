@@ -217,6 +217,8 @@ def train_dqn(
         while not done:
             steps_done += 1
             eps = epsilon_by_step(steps_done)
+            print(f"episode: {ep} and epsilon: {eps}")
+
             # ε-greedy
             if random.random() < eps:
                 a = random.randrange(n_actions)
@@ -313,7 +315,7 @@ if __name__ == "__main__":
         target_update=1000,
         eps_start=1.0,
         eps_end=0.05,
-        eps_decay=25000,
+        eps_decay=300000,
         print_every=100,
         device=device
     )

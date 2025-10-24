@@ -33,7 +33,7 @@ SAVE_INTERVAL=2000
 LOG_INTERVAL=100
 
 # Run training
-python cluster_drl_training.py \
+python train_drl.py \
     --algorithm $ALGORITHM \
     --episodes $EPISODES \
     --min_size $MIN_SIZE \

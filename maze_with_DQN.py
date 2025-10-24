@@ -118,7 +118,7 @@ class MazeEnv:
             self.agent = (nr, nc)
 
         if self.agent == self.goal:
-            reward += 1.0
+            reward += 10.0
             done = True
 
         if self.steps >= self.max_steps:

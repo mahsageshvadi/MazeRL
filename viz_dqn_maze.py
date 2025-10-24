@@ -222,7 +222,7 @@ if __name__ == "__main__":
     print("Loaded model from dqn_maze_model.pth")
 
     # 2) Make a brand-new random maze (change size/wall_frac if you want)
-    env = MazeEnv(rows=7, cols=7, wall_frac=0.6)
+    env = MazeEnv(rows=20, cols=20, wall_frac=0.25)
 
     # 3) Visualize step-by-step decisions
     viewer = MazeViewer(env, cell=40)

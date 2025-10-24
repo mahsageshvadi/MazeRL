@@ -6,10 +6,9 @@
 mkdir -p models logs results
 
 # Activate environment
-source ~/miniconda3/bin/activate maze_drl
 
 # Choose algorithm
-ALGORITHM="ddqn"  # or "ppo"
+ALGORITHM="ppo"  # or "ppo"
 
 # Training parameters
 EPISODES=100000

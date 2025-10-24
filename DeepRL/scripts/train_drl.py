@@ -1,7 +1,4 @@
-"""
-Deep Reinforcement Learning for Maze Navigation - Cluster Training
-Implements Double DQN and PPO with full neural networks for distributed training
-"""
+
 
 import torch
 import torch.nn as nn

@@ -234,7 +234,7 @@ def train_dqn(
         while not done:
             steps_done += 1
             eps = epsilon_by_step(steps_done)
-            print(f"episode: {ep} and epsilon: {eps}")
+           #(f"episode: {ep} and epsilon: {eps}")
 
             # ε-greedy
             if random.random() < eps:

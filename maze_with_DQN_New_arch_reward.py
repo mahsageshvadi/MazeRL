@@ -94,13 +94,20 @@ class MazeEnv:
         return self._obs()
 
     def _obs(self):
-        # Channels: [walls, agent, goal] as 0/1 floats
         walls = (self.maze == 1).astype(np.float32)
         agent = np.zeros_like(walls, dtype=np.float32)
         goal  = (self.maze == 3).astype(np.float32)
         agent[self.agent] = 1.0
-        obs = np.stack([walls, agent, goal], axis=0)  # (3, H, W)
+
+        # Coord channels in [-1, 1]
+        yy = np.linspace(-1, 1, self.rows, dtype=np.float32)[:, None]
+        xx = np.linspace(-1, 1, self.cols, dtype=np.float32)[None, :]
+        Y = np.repeat(yy, self.cols, axis=1)
+        X = np.repeat(xx, self.rows, axis=0)
+
+        obs = np.stack([walls, agent, goal, Y, X], axis=0)  # (5,H,W)
         return obs
+
 
     def step(self, action_idx):
         self.steps += 1
@@ -108,6 +115,13 @@ class MazeEnv:
         nr, nc = self.agent[0] + dr, self.agent[1] + dc
         reward = -0.01  # small step cost
         done = False
+
+        prev = self.agent
+        # after you update self.agent:
+        def manhattan(a,b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
+        prev_d = manhattan(prev, self.goal)
+        new_d  = manhattan(self.agent, self.goal)
+        reward += 0.02 * (prev_d - new_d)
 
         # Invalid/out-of-bounds or wall -> penalty, stay in place
         if not (0 <= nr < self.rows and 0 <= nc < self.cols) or self.maze[nr, nc] == 1:
@@ -132,24 +146,23 @@ class MazeEnv:
 class DQNCNN(nn.Module):
     def __init__(self, n_actions):
         super().__init__()
-        # input: (B, 3, H, W)
         self.conv = nn.Sequential(
             nn.Conv2d(3, 32, 3, padding=1), nn.ReLU(),
             nn.Conv2d(32, 64, 3, padding=1), nn.ReLU(),
             nn.Conv2d(64, 64, 3, padding=1), nn.ReLU(),
         )
-        # Global Average Pooling -> (B, 64)
+        # keep spatial info at a fixed resolution
+        self.down = nn.AdaptiveAvgPool2d((8, 8))  # size-agnostic in, fixed out
         self.head = nn.Sequential(
-            nn.Linear(64, 128), nn.ReLU(),
-            nn.Linear(128, n_actions)
+            nn.Flatten(),              # 64*8*8 = 4096 features
+            nn.Linear(64*8*8, 256), nn.ReLU(),
+            nn.Linear(256, n_actions),
         )
 
     def forward(self, x):
-        # x: (B,3,H,W)
-        z = self.conv(x)               # (B,64,H,W)
-        z = z.mean(dim=(2,3))          # global average pool (B,64)
-        q = self.head(z)               # (B,n_actions)
-        return q
+        z = self.conv(x)
+        z = self.down(z)
+        return self.head(z)
 
 # =========================
 # Replay Buffer
@@ -217,7 +230,7 @@ def train_dqn(
         while not done:
             steps_done += 1
             eps = epsilon_by_step(steps_done)
-          #  print(f"episode: {ep} and epsilon: {eps}")
+            print(f"episode: {ep} and epsilon: {eps}")
 
             # ε-greedy
             if random.random() < eps:

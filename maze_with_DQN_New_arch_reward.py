@@ -360,7 +360,7 @@ if __name__ == "__main__":
         device=device
     )
 
-    torch.save(policy.state_dict(), "dqn_maze_model_increased_decay.pth")
+    torch.save(policy.state_dict(), "dqn_maze_model_added_visited.pth")
 
     # Evaluate on unseen random mazes
     trials = 20

@@ -333,12 +333,12 @@ if __name__ == "__main__":
         target_update=1000,
         eps_start=1.0,
         eps_end=0.05,
-        eps_decay=300000,
+        eps_decay=3000000,
         print_every=100,
         device=device
     )
 
-    torch.save(policy.state_dict(), "dqn_maze_model.pth")
+    torch.save(policy.state_dict(), "dqn_maze_model_increased_decay.pth")
 
     # Evaluate on unseen random mazes
     trials = 20

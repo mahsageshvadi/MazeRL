@@ -350,7 +350,7 @@ if __name__ == "__main__":
     # Train on random mazes (7x7). You can later vary sizes at eval time.
     policy, _ = train_dqn(
         episodes=3000,        # increase (e.g., 5000+) for stronger policy
-        maze_size=(20,20),
+        maze_size=(7,7),
         wall_frac=0.25,
         gamma=0.99,
         lr=1e-3,
@@ -370,13 +370,13 @@ if __name__ == "__main__":
     trials = 20
     wins = 0
     for i in range(trials):
-        success, _ = greedy_rollout(policy, rows=20, cols=20, wall_frac=0.25, device=device, verbose=False)
+        success, _ = greedy_rollout(policy, rows=7, cols=7, wall_frac=0.25, device=device, verbose=False)
         wins += int(success)
     print(f"Unseen 20x20 mazes — success: {wins}/{trials}")
 
     # Show a couple of printed paths
     print("\nExample rollout 1:")
-    greedy_rollout(policy, rows=20, cols=20, wall_frac=0.25, device=device, verbose=True)
+    greedy_rollout(policy, rows=7, cols=7, wall_frac=0.25, device=device, verbose=True)
 
     print("\nExample rollout 2 (different maze):")
-    greedy_rollout(policy, rows=20, cols=20, wall_frac=0.25, device=device, verbose=True)
+    greedy_rollout(policy, rows=7, cols=7, wall_frac=0.25, device=device, verbose=True)

@@ -312,7 +312,7 @@ if __name__ == "__main__":
 
     # Train on random mazes (7x7). You can later vary sizes at eval time.
     policy, _ = train_dqn(
-        episodes=2000,        # increase (e.g., 5000+) for stronger policy
+        episodes=3000,        # increase (e.g., 5000+) for stronger policy
         maze_size=(7,7),
         wall_frac=0.25,
         gamma=0.99,
@@ -327,7 +327,7 @@ if __name__ == "__main__":
         device=device
     )
 
-    torch.save(policy.state_dict(), "dqn_maze_model_7_7.pth")
+    torch.save(policy.state_dict(), "dqn_maze_model_7_7_3000_episodes.pth")
 
     # Evaluate on unseen random mazes
     trials = 20

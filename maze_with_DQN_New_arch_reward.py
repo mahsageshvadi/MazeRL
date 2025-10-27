@@ -91,6 +91,7 @@ class MazeEnv:
         self.goal  = tuple(np.argwhere(self.maze == 3)[0])
         self.agent = self.start
         self.steps = 0
+
         self.prev_pos = None
         self.visits = np.zeros((self.rows, self.cols), dtype=np.int32)
         return self._obs()
@@ -117,43 +118,43 @@ class MazeEnv:
         dr, dc = MazeEnv.ACTIONS[action_idx]
         r1, c1 = r0 + dr, c0 + dc
 
-        reward = -0.01  # step cost
+        reward = -0.01   # small step cost
         done = False
 
-        # Decide tentative next position
+        # tentative move
         valid = (0 <= r1 < self.rows) and (0 <= c1 < self.cols) and (self.maze[r1, c1] != 1)
         next_pos = (r1, c1) if valid else (r0, c0)
 
-        
-        def manhattan(a, b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
+        # ---- ONE-SIDED progress shaping (never punish detours) ----
+        def manhattan(a,b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
         prev_d = manhattan((r0, c0), self.goal)
         new_d  = manhattan(next_pos,   self.goal)
-        reward += 0.05 * (prev_d - new_d) 
+        delta = prev_d - new_d
+        if delta > 0:
+            reward += 0.05 * delta        # only reward getting closer
 
+        # gentle bump penalty
         if not valid:
-            reward += -0.25
+            reward += -0.15               # keep small so it doesn't swamp signal
 
-        if self.prev_pos is not None and next_pos == self.prev_pos:
-            reward += -0.05 
-
-        vr, vc = next_pos
-        if not hasattr(self, "visits"):
-            self.visits = np.zeros_like(self.maze, dtype=np.int32)
-        reward += -0.002 * min(self.visits[vr, vc], 10)  # ↓ from 0.01 and cap higher
-
-        # Apply transition
+        # apply transition
         self.prev_pos = (r0, c0)
         self.agent = next_pos
+        vr, vc = next_pos
         self.visits[vr, vc] += 1
 
-        # Terminal
+        # terminal
         if self.agent == self.goal:
-            reward += 20.0
+            reward += 20.0                # strong terminal signal
             done = True
         if self.steps >= self.max_steps:
             done = True
 
+        # (optional) clip to avoid exploding negatives while debugging
+        reward = float(np.clip(reward, -1.0, 1.0))
+
         return self._obs(), reward, done, {}
+
 
 # =========================
 # DQN Model (size-agnostic via GAP)
@@ -272,8 +273,10 @@ def train_dqn(
                 s, a_b, r_b, s2, d_b = s.to(device), a_b.to(device), r_b.to(device), s2.to(device), d_b.to(device)
 
                 with torch.no_grad():
-                    q_next = target(s2).max(dim=1)[0]
+                    next_acts = policy(s2).argmax(dim=1, keepdim=True)
+                    q_next = target(s2).gather(1, next_acts).squeeze(1)
                     target_q = r_b + gamma * (1.0 - d_b) * q_next
+
 
                 q_pred = policy(s).gather(1, a_b.view(-1,1)).squeeze(1)
                 loss = F.smooth_l1_loss(q_pred, target_q)
@@ -356,12 +359,12 @@ if __name__ == "__main__":
         target_update=1000,
         eps_start=1.0,
         eps_end=0.02,   # was 0.05
-        eps_decay=80_000, # was 200_000
+        eps_decay=80000, # was 200_000
         print_every=100,
         device=device
     )
 
-    torch.save(policy.state_dict(), "dqn_maze_model_added_visited.pth")
+    torch.save(policy.state_dict(), "dqn_maze_model_refined.pth")
 
     # Evaluate on unseen random mazes
     trials = 20

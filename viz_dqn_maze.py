@@ -230,7 +230,7 @@ if __name__ == "__main__":
 
     # 1) Build model and load weights
     policy = DQNCNN(n_actions=4, in_ch=5).to(device)
-    policy.load_state_dict(torch.load("dqn_maze_model.pth", map_location=device))
+    policy.load_state_dict(torch.load("dqn_maze_model_increased_decay.pth", map_location=device))
     policy.eval()
     print("Loaded model from dqn_maze_model.pth")
 

@@ -354,8 +354,8 @@ if __name__ == "__main__":
         start_learning=1500,
         target_update=1000,
         eps_start=1.0,
-        eps_end=0.05,
-        eps_decay=300000,
+        eps_end=0.02,   # was 0.05
+        eps_decay=80_000, # was 200_000
         print_every=100,
         device=device
     )

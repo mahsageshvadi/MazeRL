@@ -86,11 +86,14 @@ class MazeEnv:
         self.reset()
 
     def reset(self):
-        self.maze = generate_random_maze(self.rows, self.cols, self.wall_frac)
+        wf = float(np.clip(np.random.normal(self.wall_frac, 0.05), 0.10, 0.40))
+        self.maze = generate_random_maze(self.rows, self.cols, wf)        
         self.start = tuple(np.argwhere(self.maze == 2)[0])
         self.goal  = tuple(np.argwhere(self.maze == 3)[0])
         self.agent = self.start
         self.steps = 0
+        self.visits = np.zeros_like(self.maze, dtype=np.int32)
+        self.prev_pos = None
         return self._obs()
 
     def _obs(self):
@@ -111,30 +114,41 @@ class MazeEnv:
 
     def step(self, action_idx):
         self.steps += 1
+        r0, c0 = self.agent
         dr, dc = MazeEnv.ACTIONS[action_idx]
-        nr, nc = self.agent[0] + dr, self.agent[1] + dc
-        reward = -0.01  # small step cost
+        r1, c1 = r0 + dr, c0 + dc
+
+        reward = -0.01  # step cost
         done = False
 
-        prev = self.agent
-        # after you update self.agent:
-        def manhattan(a,b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
-        prev_d = manhattan(prev, self.goal)
-        new_d  = manhattan(self.agent, self.goal)
-        reward += 0.02 * (prev_d - new_d)
+        # Decide tentative next position
+        valid = (0 <= r1 < self.rows) and (0 <= c1 < self.cols) and (self.maze[r1, c1] != 1)
+        next_pos = (r1, c1) if valid else (r0, c0)
 
-        # Invalid/out-of-bounds or wall -> penalty, stay in place
-        if not (0 <= nr < self.rows and 0 <= nc < self.cols) or self.maze[nr, nc] == 1:
+        
+        def manhattan(a, b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
+        prev_d = manhattan((r0, c0), self.goal)
+        new_d  = manhattan(next_pos,   self.goal)
+        reward += 0.02 * (prev_d - new_d) 
+
+        if not valid:
             reward += -0.5
-            nr, nc = self.agent
-        else:
-            # Move
-            self.agent = (nr, nc)
 
+        if self.prev_pos is not None and next_pos == self.prev_pos:
+            reward += -0.15
+
+        vr, vc = next_pos
+        reward += -0.01 * min(self.visits[vr, vc], 5)
+
+        # Apply transition
+        self.prev_pos = (r0, c0)
+        self.agent = next_pos
+        self.visits[vr, vc] += 1
+
+        # Terminal
         if self.agent == self.goal:
             reward += 10.0
             done = True
-
         if self.steps >= self.max_steps:
             done = True
 
@@ -277,8 +291,16 @@ def train_dqn(
         running_success.append(1 if success else 0)
 
         if ep % print_every == 0:
-            print(f"Episode {ep:4d} | avg success(100)={np.mean(running_success):.2f} | eps={eps:.2f} | last ep reward={ep_reward:.2f}")
-        
+            # quick greedy eval on fresh mazes, no exploration
+            eval_trials = 20
+            eval_wins = 0
+            for _ in range(eval_trials):
+                ok, _ = greedy_rollout(policy, rows=env.rows, cols=env.cols, wall_frac=env.wall_frac,
+                                    device=device, verbose=False)
+                eval_wins += int(ok)
+            print(f"Episode {ep:4d} | train(avg100)={np.mean(running_success):.2f} "
+                f"| eval_greedy={eval_wins}/{eval_trials} "
+                f"| eps={eps:.2f} | lastR={ep_reward:.2f}")
         
 
     return policy, env
@@ -323,7 +345,7 @@ if __name__ == "__main__":
 
     # Train on random mazes (7x7). You can later vary sizes at eval time.
     policy, _ = train_dqn(
-        episodes=2000,        # increase (e.g., 5000+) for stronger policy
+        episodes=3000,        # increase (e.g., 5000+) for stronger policy
         maze_size=(20,20),
         wall_frac=0.25,
         gamma=0.99,
@@ -333,7 +355,7 @@ if __name__ == "__main__":
         target_update=1000,
         eps_start=1.0,
         eps_end=0.05,
-        eps_decay=3000000,
+        eps_decay=300000,
         print_every=100,
         device=device
     )

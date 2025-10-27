@@ -11,23 +11,27 @@ import torch.nn as nn
 # Model (same as training)
 # ==========
 class DQNCNN(nn.Module):
-    def __init__(self, n_actions=4):
+    def __init__(self, n_actions, in_ch=3):
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(3, 32, 3, padding=1), nn.ReLU(),
-            nn.Conv2d(32, 64, 3, padding=1), nn.ReLU(),
-            nn.Conv2d(64, 64, 3, padding=1), nn.ReLU(),
+            nn.Conv2d(in_ch, 32, 3, padding=1), nn.ReLU(),
+            nn.Conv2d(32, 64, 3, padding=1),    nn.ReLU(),
+            nn.Conv2d(64, 64, 3, padding=1),    nn.ReLU(),
         )
+        # use adaptive pooling to keep it size-agnostic
+        self.squash = nn.AdaptiveAvgPool2d((8, 8))
         self.head = nn.Sequential(
-            nn.Linear(64, 128), nn.ReLU(),
-            nn.Linear(128, n_actions)
+            nn.Flatten(),
+            nn.Linear(64*8*8, 256), nn.ReLU(),
+            nn.Linear(256, n_actions),
         )
 
     def forward(self, x):
-        z = self.conv(x)
-        z = z.mean(dim=(2,3))           # Global Average Pooling
-        q = self.head(z)
-        return q
+        z = self.conv(x)        # (B,64,H,W)
+        z = self.squash(z)      # (B,64,8,8)
+        return self.head(z)     # (B,n_actions)
+
+
 
 # ==========
 # Env (same as training, solvable random mazes)
@@ -84,11 +88,20 @@ class MazeEnv:
         self.steps = 0
         return self._obs()
 
+        
     def _obs(self):
         walls = (self.maze == 1).astype(np.float32)
         agent = np.zeros_like(walls, dtype=np.float32); agent[self.agent] = 1.0
         goal  = (self.maze == 3).astype(np.float32)
-        return np.stack([walls, agent, goal], axis=0)  # (3,H,W)
+
+        # coord channels in [-1, 1], like training
+        yy = np.linspace(-1, 1, self.rows, dtype=np.float32)[:, None]
+        xx = np.linspace(-1, 1, self.cols, dtype=np.float32)[None, :]
+        Y = np.repeat(yy, self.cols, axis=1)
+        X = np.repeat(xx, self.rows, axis=0)
+
+        return np.stack([walls, agent, goal, Y, X], axis=0)  # (5, H, W)
+
 
     def step(self, action_idx):
         self.steps += 1
@@ -216,7 +229,7 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # 1) Build model and load weights
-    policy = DQNCNN(n_actions=4).to(device)
+    policy = DQNCNN(n_actions=4, in_ch=5).to(device)
     policy.load_state_dict(torch.load("dqn_maze_model.pth", map_location=device))
     policy.eval()
     print("Loaded model from dqn_maze_model.pth")

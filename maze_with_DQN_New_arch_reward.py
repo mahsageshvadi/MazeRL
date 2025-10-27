@@ -86,14 +86,13 @@ class MazeEnv:
         self.reset()
 
     def reset(self):
-        wf = float(np.clip(np.random.normal(self.wall_frac, 0.05), 0.10, 0.40))
-        self.maze = generate_random_maze(self.rows, self.cols, wf)        
+        self.maze = generate_random_maze(self.rows, self.cols, self.wall_frac)
         self.start = tuple(np.argwhere(self.maze == 2)[0])
         self.goal  = tuple(np.argwhere(self.maze == 3)[0])
         self.agent = self.start
         self.steps = 0
-        self.visits = np.zeros_like(self.maze, dtype=np.int32)
         self.prev_pos = None
+        self.visits = np.zeros((self.rows, self.cols), dtype=np.int32)
         return self._obs()
 
     def _obs(self):
@@ -129,16 +128,18 @@ class MazeEnv:
         def manhattan(a, b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
         prev_d = manhattan((r0, c0), self.goal)
         new_d  = manhattan(next_pos,   self.goal)
-        reward += 0.02 * (prev_d - new_d) 
+        reward += 0.05 * (prev_d - new_d) 
 
         if not valid:
-            reward += -0.5
+            reward += -0.25
 
         if self.prev_pos is not None and next_pos == self.prev_pos:
-            reward += -0.15
+            reward += -0.05 
 
         vr, vc = next_pos
-        reward += -0.01 * min(self.visits[vr, vc], 5)
+        if not hasattr(self, "visits"):
+            self.visits = np.zeros_like(self.maze, dtype=np.int32)
+        reward += -0.002 * min(self.visits[vr, vc], 10)  # ↓ from 0.01 and cap higher
 
         # Apply transition
         self.prev_pos = (r0, c0)
@@ -147,7 +148,7 @@ class MazeEnv:
 
         # Terminal
         if self.agent == self.goal:
-            reward += 10.0
+            reward += 20.0
             done = True
         if self.steps >= self.max_steps:
             done = True

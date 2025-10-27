@@ -259,9 +259,16 @@ def train_dqn(
         running_success.append(1 if success else 0)
 
         if ep % print_every == 0:
-            print(f"Episode {ep:4d} | avg success(100)={np.mean(running_success):.2f} | eps={eps:.2f} | last ep reward={ep_reward:.2f}")
-        
-        
+            # quick greedy eval on fresh mazes, no exploration
+            eval_trials = 20
+            eval_wins = 0
+            for _ in range(eval_trials):
+                ok, _ = greedy_rollout(policy, rows=env.rows, cols=env.cols, wall_frac=env.wall_frac,
+                                    device=device, verbose=False)
+                eval_wins += int(ok)
+            print(f"Episode {ep:4d} | train(avg100)={np.mean(running_success):.2f} "
+                f"| eval_greedy={eval_wins}/{eval_trials} "
+                f"| eps={eps:.2f} | lastR={ep_reward:.2f}")
 
     return policy, env
 

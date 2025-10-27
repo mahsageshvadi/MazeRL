@@ -306,7 +306,7 @@ if __name__ == "__main__":
     # Train on random mazes (7x7). You can later vary sizes at eval time.
     policy, _ = train_dqn(
         episodes=2000,        # increase (e.g., 5000+) for stronger policy
-        maze_size=(20,20),
+        maze_size=(7,7),
         wall_frac=0.25,
         gamma=0.99,
         lr=1e-3,

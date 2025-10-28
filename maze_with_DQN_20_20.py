@@ -82,7 +82,7 @@ class MazeEnv:
     def __init__(self, rows=7, cols=7, wall_frac=0.25, max_steps=None):
         self.rows, self.cols = rows, cols
         self.wall_frac = wall_frac
-        self.max_steps = max_steps or (rows * cols * 3)
+        self.max_steps = max_steps or min(rows * cols, 400)  # Cap at 400 steps
         self.reset()
 
     def reset(self):
@@ -104,31 +104,27 @@ class MazeEnv:
 
     def step(self, action_idx):
         self.steps += 1
+        old_dist = abs(self.agent[0] - self.goal[0]) + abs(self.agent[1] - self.goal[1])
+        
         dr, dc = MazeEnv.ACTIONS[action_idx]
         nr, nc = self.agent[0] + dr, self.agent[1] + dc
-        reward = -0.01  # small step cost
+        reward = -0.1  # Larger step penalty to discourage wandering
         done = False
 
-        old_dist = abs(self.agent[0] - self.goal[0]) + abs(self.agent[1] - self.goal[1])
-
-        # Invalid/out-of-bounds or wall -> penalty, stay in place
         if not (0 <= nr < self.rows and 0 <= nc < self.cols) or self.maze[nr, nc] == 1:
-            reward += -0.5
+            reward = -1.0  # Stronger wall penalty
             nr, nc = self.agent
         else:
-            # Move
             self.agent = (nr, nc)
-
-        self.agent = (nr, nc)
-        new_dist = abs(self.agent[0] - self.goal[0]) + abs(self.agent[1] - self.goal[1])
-        reward += 0.05 * (old_dist - new_dist)
-
+            new_dist = abs(self.agent[0] - self.goal[0]) + abs(self.agent[1] - self.goal[1])
+            reward += 0.1 * (old_dist - new_dist)  # Reward for progress
 
         if self.agent == self.goal:
-            reward += 50.0
+            reward = 100.0  # Higher goal reward
             done = True
 
         if self.steps >= self.max_steps:
+            reward += -10.0  # Timeout penalty (not too harsh)
             done = True
 
         return self._obs(), reward, done, {}
@@ -184,6 +180,15 @@ class ReplayBuffer:
 # =========================
 # Training
 # =========================
+
+def get_maze_size(episode):
+    if episode < 2000:
+        return (10, 10)
+    elif episode < 4000:
+        return (15, 15)
+    else:
+        return (20, 20)
+
 def train_dqn(
     episodes=3000,
     maze_size=(7,7),
@@ -211,18 +216,22 @@ def train_dqn(
     buffer = ReplayBuffer(200_000)
 
     steps_done = 0
-    def epsilon_by_step(t):
-        # exponential decay over steps
-        return eps_end + (eps_start - eps_end) * np.exp(-t / eps_decay)
-
+    def epsilon_by_episode(ep):
+    # Decay by episode instead
+        decay_episodes = 5000  # Decay over 5000 episodes
+        return max(eps_end, eps_start - (eps_start - eps_end) * (ep / decay_episodes))
+        
     running_success = deque(maxlen=100)
     for ep in range(1, episodes+1):
+        maze_rows, maze_cols = get_maze_size(ep)
+        env = MazeEnv(rows=maze_rows, cols=maze_cols, wall_frac=0.20)
         obs = env.reset()
         done = False
         ep_reward = 0.0
+        eps = epsilon_by_episode(ep)
+
         while not done:
             steps_done += 1
-            eps = epsilon_by_step(steps_done)
           #  print(f"episode: {ep} and epsilon: {eps}")
 
             # ε-greedy
@@ -318,21 +327,20 @@ if __name__ == "__main__":
 
     # Train on random mazes (7x7). You can later vary sizes at eval time.
     policy, _ = train_dqn(
-    episodes=8000,          # More episodes (20×20 is harder)
-    maze_size=(20, 20),     # Change size
-    wall_frac=0.20,         # Slightly lower wall density
+    episodes=10000,
+    maze_size=(20, 20),
+    wall_frac=0.20,
     gamma=0.99,
-    lr=5e-4,                # Lower learning rate
-    batch_size=128,         # Larger batch
-    start_learning=2000,    # More warmup steps
-    target_update=2000,     # Less frequent updates
+    lr=5e-4,
+    batch_size=128,
+    start_learning=2000,
+    target_update=2000,
     eps_start=1.0,
-    eps_end=0.05,
-    eps_decay=50000,        # Slower decay (more exploration)
+    eps_end=0.10,              # Higher minimum (was 0.05)
+    eps_decay=150000,           # Much slower (was 50000)
     print_every=100,
     device=device
-    )
-
+)
     torch.save(policy.state_dict(), "dqn_maze_model_7_7_4000_episodes_reward_50.pth")
 
     # Evaluate on unseen random mazes

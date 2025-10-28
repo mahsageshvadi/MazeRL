@@ -185,9 +185,9 @@ def get_maze_size(episode):
     if episode < 2000:
         return (10, 10)
     elif episode < 4000:
-        return (15, 15)
+        return (10, 10)
     else:
-        return (20, 20)
+        return (10, 10)
 
 def train_dqn(
     episodes=3000,
@@ -325,7 +325,6 @@ if __name__ == "__main__":
    # set_seeds(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Train on random mazes (7x7). You can later vary sizes at eval time.
     policy, _ = train_dqn(
     episodes=10000,
     maze_size=(20, 20),
@@ -349,7 +348,7 @@ if __name__ == "__main__":
     for i in range(trials):
         success, _ = greedy_rollout(policy, rows=20, cols=20, wall_frac=0.25, device=device, verbose=False)
         wins += int(success)
-    print(f"Unseen 7x7 mazes — success: {wins}/{trials}")
+    print(f"Unseen  mazes — success: {wins}/{trials}")
 
     # Show a couple of printed paths
     print("\nExample rollout 1:")

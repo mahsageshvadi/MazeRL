@@ -258,11 +258,11 @@ class MazeViewer:
 # =========================
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--weights", type=str, default="dqn_maze_model_7_7_3000_episodesg.pth",
+    p.add_argument("--weights", type=str, default="dqn_maze_model_7_7_4000_episodes_reward_50.pth",
                    help="Path to model .pth (trained with 3-channel input)")
     p.add_argument("--rows", type=int, default=7)
     p.add_argument("--cols", type=int, default=7)
-    p.add_argument("--wall_frac", type=float, default=0.5)
+    p.add_argument("--wall_frac", type=float, default=0.4)
     p.add_argument("--cell_px", type=int, default=50, help="Cell size in pixels")
     p.add_argument("--delay_ms", type=int, default=120, help="Animation delay between steps")
     p.add_argument("--cpu", action="store_true", help="Force CPU even if CUDA is available")

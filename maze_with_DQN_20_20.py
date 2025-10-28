@@ -183,11 +183,11 @@ class ReplayBuffer:
 
 def get_maze_size(episode):
     if episode < 2000:
-        return (10, 10)
+        return (20, 20)
     elif episode < 4000:
-        return (10, 10)
+        return (20, 20)
     else:
-        return (10, 10)
+        return (20, 20)
 
 def train_dqn(
     episodes=3000,

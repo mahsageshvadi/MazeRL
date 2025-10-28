@@ -118,7 +118,7 @@ class MazeEnv:
             self.agent = (nr, nc)
 
         if self.agent == self.goal:
-            reward += 10.0
+            reward += 50.0
             done = True
 
         if self.steps >= self.max_steps:
@@ -327,7 +327,7 @@ if __name__ == "__main__":
         device=device
     )
 
-    torch.save(policy.state_dict(), "dqn_maze_model_7_7_3000_episodesg.pth")
+    torch.save(policy.state_dict(), "dqn_maze_model_7_7_3000_episodes_reward_50.pth")
 
     # Evaluate on unseen random mazes
     trials = 20

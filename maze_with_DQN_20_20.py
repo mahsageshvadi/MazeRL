@@ -183,9 +183,9 @@ class ReplayBuffer:
 
 def get_maze_size(episode):
     if episode < 2000:
-        return (20, 20)
+        return (10, 10)
     elif episode < 4000:
-        return (20, 20)
+        return (15, 15)
     else:
         return (20, 20)
 
@@ -214,6 +214,7 @@ def train_dqn(
 
     opt = torch.optim.Adam(policy.parameters(), lr=lr)
     buffer = ReplayBuffer(200_000)
+    current_shape = None  # track H,W for the stage
 
     steps_done = 0
     def epsilon_by_episode(ep):
@@ -224,6 +225,12 @@ def train_dqn(
     running_success = deque(maxlen=100)
     for ep in range(1, episodes+1):
         maze_rows, maze_cols = get_maze_size(ep)
+
+        new_shape = (maze_rows, maze_cols)
+        if current_shape is None or new_shape != current_shape:
+            buffer = ReplayBuffer(200_000)    # flush old sized samples
+            current_shape = new_shape
+
         env = MazeEnv(rows=maze_rows, cols=maze_cols, wall_frac=0.20)
         obs = env.reset()
         done = False
@@ -340,7 +347,7 @@ if __name__ == "__main__":
     print_every=100,
     device=device
 )
-    torch.save(policy.state_dict(), "dqn_maze_model_20_20.pth")
+    torch.save(policy.state_dict(), "dqn_maze_model_20_20_ciruculum_learning.pth")
 
     # Evaluate on unseen random mazes
     trials = 20

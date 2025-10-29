@@ -128,7 +128,6 @@ class CurveEnv:
         return obs
 
     def step(self, a_idx: int):
-
         self.steps += 1
         dy, dx = ACTIONS_8[a_idx]
         ny = clamp(self.agent[0] + dy*STEP_ALPHA, 0, self.h-1)
@@ -137,15 +136,11 @@ class CurveEnv:
 
         # Move & mark
         self.prev = [self.agent, self.prev[0]]
+        
+        # Check revisit BEFORE moving (so we check the destination)
+        revisited = self.path_mask[new_pos] > 0.5
+        
         self.agent = new_pos
-
-        # Start reward at 0
-        r = 0.0
-
-        # Revisit penalty (check BEFORE marking the new cell)
-        if self.path_mask[self.agent] > 0.5:
-            r -= self.revisit_penalty
-
         self.path_points.append(self.agent)
         self.path_mask[self.agent] = 1.0
 
@@ -154,48 +149,63 @@ class CurveEnv:
         delta = d_gt - self.L_prev_local
         self.L_prev_local = d_gt
 
-        # ---- on-curve / overlap term ----
+        # ============ REWARD COMPUTATION ============
+        r = 0.0
+        
+        # 1. Base reward: on-curve vs off-curve (small per-step)
         on_curve = d_gt < self.overlap_dist
-        overlap = 1.0 if on_curve else 0.0         # <<< define overlap for info
-        r += (2.0 if on_curve else -2.0)           # <<< accumulate, don't overwrite
-
-        # Initial direction gating (optional)
+        if on_curve:
+            r += 0.5  # Small positive for being on curve
+        else:
+            r -= 0.1  # Small penalty for being off
+        
+        # 2. Progress reward (most important!)
+        if delta < -0.2:  # Getting closer to curve
+            r += 0.3
+        elif delta > 0.2:  # Getting farther
+            r -= 0.2
+        
+        # 3. Revisit penalty (only once!)
+        if revisited:
+            r -= self.revisit_penalty
+        
+        # 4. Initial direction guidance (first few steps)
         if self.steps <= 3:
             v0 = np.array(self.ep.init_dir, dtype=np.float32)
             vt = np.array([dy, dx], dtype=np.float32)
-            if v0.dot(vt) < 0:   # moving opposite initial direction
-                delta += 0.25
-
-        # --- paper-style-ish local delta shaping (robust bins) ---
-        if delta < -0.1:        # improved
-            r += 1.0
-        elif delta > 0.1:       # worse
-            r -= 0.5
-
-        # (Optional) second revisit check is redundant; remove to avoid double-penalizing
-        if self.path_mask[self.agent] > 0.5:
-             r -= self.revisit_penalty
-
-        r = float(np.clip(r, -5.0, 5.0))
-
-        # ---- Progress-based episode endings ----
+            if np.linalg.norm(v0) > 0 and np.linalg.norm(vt) > 0:
+                cos_sim = v0.dot(vt) / (np.linalg.norm(v0) * np.linalg.norm(vt))
+                if cos_sim < 0:  # Wrong direction
+                    r -= 0.3
+        
+        # 5. Clip to reasonable range
+        r = float(np.clip(r, -2.0, 2.0))
+        
+        # ============ PROGRESS TRACKING ============
         if idx > self.best_idx:
             self.best_idx = idx
             self.no_progress_steps = 0
+            # Bonus for making progress along the curve
+            r += 0.5
         else:
             self.no_progress_steps += 1
-
+        
+        # ============ EPISODE TERMINATION ============
         end_margin = 5
         reached_end = (self.best_idx >= len(self.ep.gt_poly) - 1 - end_margin)
         timeout = (self.steps >= self.max_steps)
         stalled = (self.no_progress_steps >= self.stall_patience)
-
+        
         done = reached_end or stalled or timeout
+        
+        # Terminal rewards
         if reached_end:
-            r += 2.0   # success bonus
-
+            r += 10.0  # Big success bonus
+        elif stalled:
+            r -= 2.0   # Penalty for getting stuck
+        
         return self.obs(), float(r), done, {
-            "overlap": overlap,          # <<< now defined
+            "overlap": 1.0 if on_curve else 0.0,
             "L_local": d_gt,
             "idx": idx,
             "reached_end": reached_end,
@@ -434,7 +444,7 @@ def main():
     p.add_argument("--train", action="store_true")
     p.add_argument("--view",  action="store_true")
     p.add_argument("--episodes", type=int, default=5000)
-    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--gamma", type=float, default=0.99)
     p.add_argument("--lam", type=float, default=0.95)
     p.add_argument("--clip", type=float, default=0.2)

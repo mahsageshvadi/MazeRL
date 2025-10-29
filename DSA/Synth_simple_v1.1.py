@@ -152,10 +152,8 @@ class CurveEnv:
                 delta += 0.25
 
         eps = 1e-6
-        if delta < 0:
-            r = overlap - math.log(eps + abs(delta))
-        else:
-            r = overlap + math.log(eps + abs(delta))
+        r = 10 * overlap - np.clip(np.log1p(abs(delta)), 0, 1)
+
 
         done = (self.steps >= self.max_steps)
         if L_cur < 0.75:

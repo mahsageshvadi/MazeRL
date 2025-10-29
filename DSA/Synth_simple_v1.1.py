@@ -238,26 +238,36 @@ class ActorCritic(nn.Module):
 
 
 class PPO:
-    def __init__(self, model, n_actions=8, clip=0.2, gamma=0.95, lam=0.95,
-                 lr=1e-4, epochs=4, minibatch=64, entropy_coef=0.03):
+    def __init__(self, model: ActorCritic, n_actions=8, clip=0.2, gamma=0.95, lam=0.95, lr=3e-4, epochs=4, minibatch=64):
         self.model = model
         self.clip = clip
         self.gamma = gamma
         self.lam = lam
         self.epochs = epochs
         self.minibatch = minibatch
-        self.entropy_coef = entropy_coef
         self.opt = torch.optim.Adam(self.model.parameters(), lr=lr)
 
-    def update(self, buf):
-        obs   = torch.tensor(np.stack(buf["obs"]),   dtype=torch.float32, device=DEVICE)
-        ahist = torch.tensor(np.stack(buf["ahist"]), dtype=torch.float32, device=DEVICE)
-        act   = torch.tensor(np.array(buf["act"]),   dtype=torch.long,    device=DEVICE)
-        old_logp = torch.tensor(np.array(buf["logp"]), dtype=torch.float32, device=DEVICE)
-        adv   = torch.tensor(np.array(buf["adv"]),   dtype=torch.float32, device=DEVICE)
-        ret   = torch.tensor(np.array(buf["ret"]),   dtype=torch.float32, device=DEVICE)
+    @staticmethod
+    def compute_gae(rewards, values, dones, gamma, lam):
+        T = len(rewards)
+        adv = np.zeros(T, dtype=np.float32)
+        gae = 0.0
+        for t in reversed(range(T)):
+            next_v = 0.0 if dones[t] else (values[t+1] if t+1 < len(values) else 0.0)
+            delta = rewards[t] + gamma * next_v - values[t]
+            gae = delta + gamma * lam * (0.0 if dones[t] else gae)
+            adv[t] = gae
+        ret = adv + values[:T]
+        return adv, ret
 
-        # Normalize advantages robustly
+    def update(self, buf):
+        obs      = torch.tensor(np.stack(buf["obs"]), dtype=torch.float32, device=DEVICE)          # (N,4,33,33)
+        ahist    = torch.tensor(np.stack(buf["ahist"]), dtype=torch.float32, device=DEVICE)        # (N,K,8)
+        act      = torch.tensor(np.array(buf["act"]),  dtype=torch.long,    device=DEVICE)         # (N,)
+        old_logp = torch.tensor(np.array(buf["logp"]),dtype=torch.float32, device=DEVICE)          # (N,)
+        adv      = torch.tensor(np.array(buf["adv"]), dtype=torch.float32, device=DEVICE)          # (N,)
+        ret      = torch.tensor(np.array(buf["ret"]), dtype=torch.float32, device=DEVICE)          # (N,)
+
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
         N = obs.size(0)
@@ -266,47 +276,22 @@ class PPO:
             np.random.shuffle(idx)
             for s in range(0, N, self.minibatch):
                 mb = idx[s:s+self.minibatch]
-
                 logits, value, _ = self.model(obs[mb], ahist[mb], None)
-                # Guard: skip bad minibatch if logits go non-finite
-                if not torch.isfinite(logits).all() or not torch.isfinite(value).all():
-                    # skip this minibatch
-                    continue
-
                 dist = Categorical(logits=logits)
                 logp = dist.log_prob(act[mb])
-                entropy = dist.entropy()
 
-                # another guard: if any non-finite, skip
-                if not torch.isfinite(logp).all() or not torch.isfinite(entropy).all():
-                    continue
-
-                ratio = torch.exp(torch.clamp(logp - old_logp[mb], -20, 20))
+                ratio = torch.exp(logp - old_logp[mb])
                 surr1 = ratio * adv[mb]
                 surr2 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * adv[mb]
                 policy_loss = -torch.min(surr1, surr2).mean()
 
                 value_loss = F.mse_loss(value, ret[mb])
+                entropy = dist.entropy().mean()
 
-                loss = policy_loss + 0.5 * value_loss - self.entropy_coef * entropy.mean()
-
-                # final guard
-                if not torch.isfinite(loss):
-                    continue
-
-                self.opt.zero_grad(set_to_none=True)
+                loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
+                self.opt.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)  # tighter clip
-                # Optional: skip step if grads blew up
-                total_norm = 0.0
-                for p in self.model.parameters():
-                    if p.grad is not None:
-                        param_norm = p.grad.data.norm(2)
-                        total_norm += param_norm.item() ** 2
-                total_norm = total_norm ** 0.5
-                if not math.isfinite(total_norm):
-                    continue
-
+                nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 self.opt.step()
 
 
@@ -325,9 +310,8 @@ def train(args):
 
     model.apply(ortho_init)
 
-    ppo = PPO(model, lr=1e-4, gamma=args.gamma, lam=args.lam,
-          clip=args.clip, epochs=args.epochs, minibatch=args.minibatch)
-
+    ppo = PPO(model, lr=args.lr, gamma=args.gamma, lam=args.lam, clip=args.clip,
+              epochs=args.epochs, minibatch=args.minibatch)
 
     ep_returns = []
     for ep in range(1, args.episodes+1):

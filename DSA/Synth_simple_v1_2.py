@@ -128,6 +128,7 @@ class CurveEnv:
         return obs
 
     def step(self, a_idx: int):
+
         self.steps += 1
         dy, dx = ACTIONS_8[a_idx]
         ny = clamp(self.agent[0] + dy*STEP_ALPHA, 0, self.h-1)
@@ -138,8 +139,10 @@ class CurveEnv:
         self.prev = [self.agent, self.prev[0]]
         self.agent = new_pos
 
-        # Revisit penalty (applied after we move but before marking)
+        # Start reward at 0
         r = 0.0
+
+        # Revisit penalty (check BEFORE marking the new cell)
         if self.path_mask[self.agent] > 0.5:
             r -= self.revisit_penalty
 
@@ -151,10 +154,10 @@ class CurveEnv:
         delta = d_gt - self.L_prev_local
         self.L_prev_local = d_gt
 
-        # Soften overlap: consider "on-curve" if close enough
+        # ---- on-curve / overlap term ----
         on_curve = d_gt < self.overlap_dist
-        r = 2.0 if on_curve else -2.0
-
+        overlap = 1.0 if on_curve else 0.0         # <<< define overlap for info
+        r += (2.0 if on_curve else -2.0)           # <<< accumulate, don't overwrite
 
         # Initial direction gating (optional)
         if self.steps <= 3:
@@ -163,15 +166,15 @@ class CurveEnv:
             if v0.dot(vt) < 0:   # moving opposite initial direction
                 delta += 0.25
 
-        # --- paper-style reward (with normalization and clipping) ---
-        if delta < -0.1:  # significantly improved
+        # --- paper-style-ish local delta shaping (robust bins) ---
+        if delta < -0.1:        # improved
             r += 1.0
-        elif delta > 0.1:  # got worse
+        elif delta > 0.1:       # worse
             r -= 0.5
 
-
+        # (Optional) second revisit check is redundant; remove to avoid double-penalizing
         if self.path_mask[self.agent] > 0.5:
-            r -= self.revisit_penalty
+             r -= self.revisit_penalty
 
         r = float(np.clip(r, -5.0, 5.0))
 
@@ -191,7 +194,14 @@ class CurveEnv:
         if reached_end:
             r += 2.0   # success bonus
 
-        return self.obs(), float(r), done, {"overlap": overlap, "L_local": d_gt, "idx": idx}
+        return self.obs(), float(r), done, {
+            "overlap": overlap,          # <<< now defined
+            "L_local": d_gt,
+            "idx": idx,
+            "reached_end": reached_end,
+            "stalled": stalled,
+            "timeout": timeout
+        }
 
 # ---------- model / PPO ----------
 def gn(c, g=8):  # simple GroupNorm helper

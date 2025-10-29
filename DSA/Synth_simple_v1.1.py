@@ -42,20 +42,34 @@ def set_seeds(seed=123):
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     if DEVICE == "cuda": torch.cuda.manual_seed_all(seed)
 
-def clamp(v, lo, hi): return max(lo, min(hi, v))
+def clamp(v, lo, hi):
 
-def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
-    """Square crop centered at (cy,cx), zero-padded if near border."""
+    return max(lo, min(v, hi))
+
+def crop32(img: np.ndarray, cy: int, cx: int, size=33):
+
     h, w = img.shape
     r = size // 2
-    y0, y1 = cy - r, cy + r + 1
-    x0, x1 = cx - r, cx + r + 1
+    y0, y1 = cy - r, cy + r + 1   # [y0, y1)
+    x0, x1 = cx - r, cx + r + 1   # [x0, x1)
+
+    # ✅ clamp the VALUES (y0,y1,...) not 0
+    sy0, sy1 = clamp(y0, 0, h), clamp(y1, 0, h)
+    sx0, sx1 = clamp(x0, 0, w), clamp(x1, 0, w)
+
     out = np.zeros((size, size), dtype=img.dtype)
-    sy0, sy1 = clamp(0, y0, h), clamp(0, y1, h)
-    sx0, sx1 = clamp(0, x0, w), clamp(0, x1, w)
-    oy0, oy1 = sy0 - y0, sy1 - y0
-    ox0, ox1 = sx0 - x0, sx1 - x0
-    out[oy0:oy1, ox0:ox1] = img[sy0:sy1, sx0:sx1]
+
+    # destination spans exactly the same width/height we pull from source
+    oy0 = sy0 - y0
+    ox0 = sx0 - x0
+    sh  = sy1 - sy0
+    sw  = sx1 - sx0
+    oy1 = oy0 + sh
+    ox1 = ox0 + sw
+
+    if sh > 0 and sw > 0:
+        out[oy0:oy1, ox0:ox1] = img[sy0:sy1, sx0:sx1]
+
     return out
 
 def chamfer_distance_bidirectional(P: np.ndarray, Q: np.ndarray) -> float:

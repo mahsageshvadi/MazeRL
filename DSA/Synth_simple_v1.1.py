@@ -28,7 +28,7 @@ from Curve_Generator import CurveMaker
 # ---------- globals / utils ----------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ACTIONS_8 = [(-1, 0), (1, 0), (0,-1), (0, 1), (-1,-1), (-1,1), (1,-1), (1,1)]
-STEP_ALPHA = 2
+STEP_ALPHA = 1
 CROP = 33
 
 def set_seeds(seed=123):
@@ -147,6 +147,7 @@ class CurveEnv:
         ny = clamp(self.agent[0] + dy*STEP_ALPHA, 0, self.h-1)
         nx = clamp(self.agent[1] + dx*STEP_ALPHA, 0, self.w-1)
         new_pos = (ny, nx)
+        
         self.prev = [self.agent, self.prev[0]]
         self.agent = new_pos
         self.path_points.append(self.agent)
@@ -203,8 +204,6 @@ class CurveEnv:
         # Optional: bonus only on true success (not on stall/timeout)
         if reached_end:
             r += 2.0
-
-        done = (self.steps >= self.max_steps)
 
 
         return self.obs(), float(r), done, {"overlap": overlap, "L": L_cur}

@@ -76,6 +76,11 @@ def chamfer_distance_bidirectional(P: np.ndarray, Q: np.ndarray) -> float:
         d2.append(np.min(dy*dy + dx*dx))
     return float(math.sqrt((np.mean(d1) + np.mean(d2)) * 0.5))
 
+def nearest_gt_index(pt, poly):
+    dif = poly - np.array(pt, dtype=np.float32)
+    d2 = np.sum(dif * dif, axis=1)
+    i = int(np.argmin(d2))
+    return i, float(np.sqrt(d2[i]))
 
 # ---------- environment ----------
 @dataclass
@@ -102,6 +107,9 @@ class CurveEnv:
         p1 = gt_poly[min(5, len(gt_poly)-1)].astype(int)
         init_vec = np.sign(np.array([p1[0]-p0[0], p1[1]-p0[1]], dtype=np.int32))
         init_vec[init_vec==0] = 1
+        self.best_idx = 0
+        self.prev_idx = 0
+        self.no_progress_steps = 0
 
         self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly,
                                start=(int(p0[0]), int(p0[1])),
@@ -127,8 +135,13 @@ class CurveEnv:
         ch3 = crop32(self.path_mask, p_t[0], p_t[1])
         obs = np.stack([ch0, ch1, ch2, ch3], axis=0).astype(np.float32)
         return obs
+    
+        
+
+
 
     def step(self, a_idx: int):
+
         self.steps += 1
         dy, dx = ACTIONS_8[a_idx]
         ny = clamp(self.agent[0] + dy*STEP_ALPHA, 0, self.h-1)
@@ -140,25 +153,59 @@ class CurveEnv:
         self.path_mask[self.agent] = 1.0
 
         overlap = 1.0 if self.ep.mask[self.agent] > 0 else 0.0
-        L_cur = chamfer_distance_bidirectional(np.array(self.path_points, dtype=np.float32),
-                                               self.ep.gt_poly)
+
+        L_cur = chamfer_distance_bidirectional(
+            np.array(self.path_points, dtype=np.float32),
+            self.ep.gt_poly
+        )
         delta = L_cur - self.L_prev
         self.L_prev = L_cur
 
+        # tiny direction gate (optional)
         if self.steps <= 3:
             v0 = np.array(self.ep.init_dir, dtype=np.float32)
             vt = np.array([dy, dx], dtype=np.float32)
             if v0.dot(vt) < 0:
                 delta += 0.25
 
+        # --- paper-style reward ---
         eps = 1e-6
-        r = 10 * overlap - np.clip(np.log1p(abs(delta)), 0, 1)
+        D0  = 2.0
+        x   = abs(delta) / D0
+        logterm = math.log(eps + x)
 
+        if delta < 0:
+            r = overlap - logterm
+        else:
+            r = overlap + logterm
+
+        # Optional PPO stabilization
+        r = float(np.clip(r, -3.0, 3.0))
+
+
+        idx, d_gt = nearest_gt_index(self.agent, self.ep.gt_poly)
+        if idx > self.best_idx:
+            self.best_idx = idx
+            self.no_progress_steps = 0
+        else:
+            self.no_progress_steps += 1
+
+        end_margin = 5                      # within last 5 points counts as "end"
+        reached_end = (self.best_idx >= len(self.ep.gt_poly) - 1 - end_margin)
+
+        # Safety: terminate if stuck too long or out of steps
+        stall_patience = 50                 # no forward progress for 50 steps
+        timeout = (self.steps >= self.max_steps)
+        stalled = (self.no_progress_steps >= stall_patience)
+
+        done = reached_end or stalled or timeout
+
+        # Optional: bonus only on true success (not on stall/timeout)
+        if reached_end:
+            r += 2.0
 
         done = (self.steps >= self.max_steps)
-        if L_cur < 0.75:
-            done = True
-            r += 2.0
+
 
         return self.obs(), float(r), done, {"overlap": overlap, "L": L_cur}
 

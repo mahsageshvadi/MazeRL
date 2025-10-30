@@ -166,23 +166,18 @@ class CurveEnv:
         on_curve = d_gt < self.overlap_dist
         B_t = 1.0 if on_curve else 0.0
         
-        # Curve-to-curve distance reward (Equation 3 from paper)
-        # Key insight: negative delta means getting closer (good!)
-        eps = 1e-3  # Increased from 1e-8 to avoid extreme log values
-        
-        # Normalize by D0 to make reward scale-invariant
-        delta_normalized = abs(delta) / max(self.D0, 1e-3)
-        
-        if delta < -0.01:  # Getting closer to the curve (threshold to avoid noise)
-            # Negative log = positive reward (closer is better)
-            r = B_t - math.log(eps + delta_normalized)
-        elif delta > 0.01:  # Getting farther from curve
-            # Positive log = negative reward (farther is worse)
-            r = B_t + math.log(eps + delta_normalized)
-        else:
-            # Staying roughly same distance
-            r = B_t
-        
+        improve = max(0.0, -delta)     # amount you got closer this step (>=0)
+        worsen  = max(0.0,  delta)     # amount you got farther this step (>=0)
+
+        eps = 1e-6
+
+        r = B_t \
+            + math.log1p(improve / max(self.D0, eps)) \
+            - 0.5 * math.log1p(worsen  / max(self.D0, eps))
+
+        # Keep the same clipping you used:
+        r = float(np.clip(r, -5.0, 5.0))
+                
         # Clip reward to reasonable range
         r = float(np.clip(r, -5.0, 5.0))
         

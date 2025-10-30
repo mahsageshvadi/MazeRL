@@ -88,7 +88,7 @@ def rollout_once(model, env, K=8, greedy=True, max_frames_gif=400):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--weights", type=str, default="DSA/ckpt_curveppo_v1_2_4.pth",
+    ap.add_argument("--weights", type=str, default="DSA/ckpt_curveppo_v1_5.pth",
                     help="Path to trained weights .pth (use absolute or relative path).")
     ap.add_argument("--episodes", type=int, default=10, help="Number of unseen curves to evaluate.")
     ap.add_argument("--outdir", type=str, default="eval_out", help="Output directory for PNG/GIF.")

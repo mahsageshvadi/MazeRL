@@ -27,7 +27,7 @@ from Curve_Generator import CurveMaker
 # ---------- globals / utils ----------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ACTIONS_8 = [(-1, 0), (1, 0), (0,-1), (0, 1), (-1,-1), (-1,1), (1,-1), (1,1)]
-STEP_ALPHA = 1
+STEP_ALPHA = 2
 CROP = 33
 
 def set_seeds(seed=123):

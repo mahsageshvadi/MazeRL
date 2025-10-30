@@ -27,7 +27,7 @@ from Curve_Generator import CurveMaker
 # ---------- globals / utils ----------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ACTIONS_8 = [(-1, 0), (1, 0), (0,-1), (0, 1), (-1,-1), (-1,1), (1,-1), (1,1)]
-STEP_ALPHA = 2
+STEP_ALPHA = 1
 CROP = 33
 
 def set_seeds(seed=123):
@@ -196,13 +196,12 @@ class CurveEnv:
         timeout = (self.steps >= self.max_steps)
         stalled = (self.no_progress_steps >= self.stall_patience)
         
-        done = reached_end or stalled or timeout
+        done = reached_end  or timeout
         
         # Terminal rewards
         if reached_end:
-            r += 10.0  # Big success bonus
-        elif stalled:
-            r -= 2.0   # Penalty for getting stuck
+            r += 100.0  # Big success bonus
+
         
         return self.obs(), float(r), done, {
             "overlap": 1.0 if on_curve else 0.0,

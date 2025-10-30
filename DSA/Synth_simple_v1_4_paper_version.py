@@ -82,6 +82,15 @@ def curve_to_curve_distance(path_points, gt_poly):
     
     return total_dist
 
+def mean_surface_distance(path_points, gt_poly):
+    if not path_points: return 0.0
+    d = []
+    for pt in np.array(path_points, dtype=np.float32):
+        dif = gt_poly - pt
+        d2 = np.sum(dif * dif, axis=1)
+        d.append(np.sqrt(np.min(d2)))
+    return float(np.mean(d))
+
 # ---------- environment ----------
 @dataclass
 class CurveEpisode:
@@ -196,7 +205,7 @@ class CurveEnv:
         
         # (2) Agent is way off reference (more lenient during training)
         # 3.6mm = 8 voxels @ 0.45mm spacing (doubled from paper's 1.8mm)
-        off_track = d_gt > 5.0  # More lenient for 2D synthetic curves
+        off_track = d_gt > 20  # More lenient for 2D synthetic curves
         
         # (3) Target reached (near end of curve)
         end_margin = 5
@@ -213,9 +222,10 @@ class CurveEnv:
         elif off_track or exceeded_length:
             r -= 5.0  # Penalty for failure
         
-        # Compute CCS metric for monitoring
-        L_t = curve_to_curve_distance(self.path_points, self.ep.gt_poly)
-        ccs = 1.0 - (L_t / self.L0)
+        
+        L_mean = mean_surface_distance(self.path_points, self.ep.gt_poly)
+
+        ccs = 1.0 - (L_mean / 5.0)
         
         return self.obs(), float(r), done, {
             "overlap": 1.0 if on_curve else 0.0,

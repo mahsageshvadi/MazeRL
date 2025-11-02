@@ -169,14 +169,13 @@ class CurveEnv:
         # Local surface distance at current position
         idx, d_gt = nearest_gt_index(self.agent, self.ep.gt_poly)
         delta = d_gt - self.L_prev_local
-        
-        # ============ REWARD COMPUTATION (Paper Equation 3) ============
-        # Binary overlap metric
+
+
         on_curve = d_gt < self.overlap_dist
         B_t = 1.0 if on_curve else 0.0
         
-        improve = max(0.0, -delta)     # amount you got closer this step (>=0)
-        worsen  = max(0.0,  delta)     # amount you got farther this step (>=0)
+        improve = max(0.0, -delta)    
+        worsen  = max(0.0,  delta)     
 
         eps = 1e-6
 
@@ -186,9 +185,7 @@ class CurveEnv:
 
         # Keep the same clipping you used:
         r = float(np.clip(r, -5.0, 5.0))
-                
-        # Clip reward to reasonable range
-        r = float(np.clip(r, -5.0, 5.0))
+  
         
         # Update local distance for next step
         self.L_prev_local = d_gt

@@ -176,7 +176,7 @@ class CurveEnv:
             r = B_t + math.log(eps + delta_abs / self.D0)
         
         # Clip reward to reasonable range
-        r = float(np.clip(r, -10.0, 10.0))
+       # r = float(np.clip(r, -10.0, 10.0))
         
         # Update local distance for next step
         self.L_prev_local = d_gt
@@ -492,7 +492,7 @@ def view(args):
 # ---------- CLI ----------
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--train", action="store_true")
+    p.add_argument("--train", default=True, action="store_true")
     p.add_argument("--view",  action="store_true")
     p.add_argument("--episodes", type=int, default=5000)
     p.add_argument("--entropy_coef", type=float, default=0.03)

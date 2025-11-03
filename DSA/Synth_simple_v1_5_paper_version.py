@@ -21,10 +21,10 @@ ACTIONS_8 = [(-1, 0), (1, 0), (0,-1), (0, 1), (-1,-1), (-1,1), (1,-1), (1,1)]
 STEP_ALPHA = 2              # paper uses step scaling
 CROP = 33                   # local window size
 DILATE_RADIUS = 4           # ~ 1.8mm -> ~4 voxels (paper)
-EPS_LOG = 1e-3              # safer epsilon for log
-R_LOG_CLAMP = 6.0           # clamp |log| to avoid spikes
-LAMBDA_B = 1.0              # weight for B_t
-LAMBDA_DELTA = 1.0          # weight for log term
+LAMBDA_B     = 2.0    # was 1.0
+LAMBDA_DELTA = 0.7    # was 1.0
+EPS_LOG      = 1e-2   # was 1e-3
+R_LOG_CLAMP  = 3.0    # was 6.0       # weight for log term
 
 def set_seeds(seed=123):
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
@@ -75,11 +75,8 @@ def euclid(a, b):
     return float(np.linalg.norm(np.asarray(a, dtype=np.float32) - np.asarray(b, dtype=np.float32)))
 
 # ---------- global curve-to-curve distance (DTW-style optimal alignment) ----------
+# --- replace your dtw_curve_distance() with this normalized version ---
 def dtw_curve_distance(path_points: List[Tuple[int,int]], gt_poly: np.ndarray) -> float:
-    """
-    Monotone alignment cost between two polylines (DTW-like).
-    Cost = sum of per-match Euclidean distances along an optimal warping path.
-    """
     if len(path_points) == 0 or len(gt_poly) == 0:
         return 0.0
     P = np.asarray(path_points, dtype=np.float32)
@@ -89,7 +86,6 @@ def dtw_curve_distance(path_points: List[Tuple[int,int]], gt_poly: np.ndarray) -
     for i in range(n):
         for j in range(m):
             C[i, j] = np.linalg.norm(P[i] - G[j])
-    # dp
     dp = np.full((n, m), np.inf, dtype=np.float32)
     dp[0, 0] = C[0, 0]
     for i in range(1, n):
@@ -99,7 +95,10 @@ def dtw_curve_distance(path_points: List[Tuple[int,int]], gt_poly: np.ndarray) -
     for i in range(1, n):
         for j in range(1, m):
             dp[i, j] = C[i, j] + min(dp[i-1, j], dp[i, j-1], dp[i-1, j-1])
-    return float(dp[n-1, m-1])
+    # normalize by an approximate alignment length to keep the scale stable
+    norm = float(n + m)
+    return float(dp[n-1, m-1] / max(norm, 1.0))
+
 
 def compute_ccs(L_t: float, L0: float) -> float:
     L0 = max(L0, 1e-6)
@@ -148,6 +147,7 @@ class CurveEnv:
         self.branches = branches
         self.D0 = d0
         self.dilate_radius = dilate_radius
+        self.off_track_thresh = 1.8
         self.reset()
 
     def reset(self):
@@ -190,7 +190,8 @@ class CurveEnv:
         stuck_path = [self.agent] * len(self.ep.gt_poly)
         self.L0 = dtw_curve_distance(stuck_path, self.ep.gt_poly)
         if self.L0 < 1e-6:
-            self.L0 = 1.0  # fallback
+            self.L0 = 1.0
+
 
         self.last_reward = 0.0  # for critic feature vector
         return self.obs()
@@ -242,7 +243,7 @@ class CurveEnv:
         ref_length = len(self.ep.gt_poly)
         track_length = len(self.path_points)
         exceeded_length = track_length > 1.5 * ref_length
-        off_track = d_gt > 1.8
+        off_track = d_gt > self.off_track_thresh
         end_margin = 5
         reached_end = (idx >= len(self.ep.gt_poly) - 1 - end_margin)
         timeout = (self.steps >= self.max_steps)
@@ -268,18 +269,11 @@ class CurveEnv:
             "ccs": ccs
         }
 
-# ---------- model / PPO ----------
-def inorm(c):  # InstanceNorm2d w/ affine
+def inorm(c): 
     return nn.InstanceNorm2d(c, eps=1e-5, affine=True)
 
 class ActorCritic(nn.Module):
-    """
-    - CNN with InstanceNorm + PReLU
-    - Two RNN streams:
-        * Actor LSTM gets action-onehot history (K x nA)
-        * Critic LSTM gets feature history (K x Fdim): [r_{t-1}, log1p|r_{t-1}|, I_t, meanI_t]
-    - Extra CNN input channel for ternary GT map
-    """
+
     def __init__(self, n_actions=8, K=8, feat_dim=4, in_ch=5):
         super().__init__()
         self.n_actions = n_actions
@@ -352,18 +346,23 @@ class PPO:
         self.patience_counter = 0
         self.best_val_score = -float('inf')
 
+    # --- inside PPO.update_learning_rate ---
     def update_learning_rate(self, val_score):
         if val_score > self.best_val_score:
             self.best_val_score = val_score
             self.patience_counter = 0
         else:
             self.patience_counter += 1
+
         if self.patience_counter >= self.patience:
             self.lr = max(self.lr / 2.0, self.lr_lower_bound)
             for pg in self.opt.param_groups:
                 pg['lr'] = self.lr
+            # also reduce entropy pressure a bit
+            self.entropy_coef = max(self.entropy_coef * 0.7, 0.005)
             self.patience_counter = 0
-            print(f"Learning rate reduced to {self.lr}")
+            print(f"Learning rate reduced to {self.lr} | entropy_coef -> {self.entropy_coef}")
+
 
     @staticmethod
     def compute_gae(rewards, values, dones, gamma, lam):
@@ -450,12 +449,25 @@ def train(args):
     model = ActorCritic(n_actions=nA, K=K, feat_dim=Fdim, in_ch=5).to(DEVICE)
 
     ppo = PPO(model, lr=1e-5, gamma=0.9, lam=0.95, clip=0.2,
-              epochs=10, minibatch=8, entropy_coef=args.entropy_coef)
+              epochs=10, minibatch=8, entropy_coef=0.05)
+    rollout_buf = {k: [] for k in ["obs","ahist","fhist","act","logp","adv","ret"]}
 
     ep_returns = []
     ep_ccs_scores = []
 
     for ep in range(1, args.episodes+1):
+
+        # per-episode curriculum
+        if ep < 2000:
+            env.dilate_radius = 5
+            env.off_track_thresh = 3.0
+        elif ep < 4000:
+            env.dilate_radius = 4
+            env.off_track_thresh = 2.4
+        else:
+            env.dilate_radius = 3  # or your original
+            env.off_track_thresh = 1.8
+
         obs = env.reset()
         done = False
         ahist = []
@@ -519,16 +531,25 @@ def train(args):
         adv, ret = PPO.compute_gae(np.array(traj["rew"], dtype=np.float32),
                                    values, traj["done"], 0.9, 0.95)
 
-        buf = {
-            "obs":   np.array(traj["obs"], dtype=np.float32),
-            "ahist": np.array(traj["ahist"], dtype=np.float32),
-            "fhist": np.array(traj["fhist"], dtype=np.float32),
-            "act":   traj["act"],
-            "logp":  traj["logp"],
-            "adv":   adv,
-            "ret":   ret,
-        }
-        ppo.update(buf)
+        ep_buf = {
+        "obs":   np.array(traj["obs"], dtype=np.float32),
+        "ahist": np.array(traj["ahist"], dtype=np.float32),
+        "fhist": np.array(traj["fhist"], dtype=np.float32),
+        "act":   np.array(traj["act"], dtype=np.int64),
+        "logp":  np.array(traj["logp"], dtype=np.float32),
+        "adv":   adv,
+        "ret":   ret,
+    }
+    for k in rollout_buf:
+        rollout_buf[k].append(ep_buf[k])
+
+    # only update once we have minibatch episodes
+    if len(rollout_buf["obs"]) >= ppo.minibatch:
+        # concatenate episodes along batch dimension
+        cat_buf = {k: np.concatenate(rollout_buf[k], axis=0) for k in rollout_buf}
+        ppo.update(cat_buf)
+        # clear for next cycle
+        rollout_buf = {k: [] for k in rollout_buf}
         ep_returns.append(ep_ret)
 
         if ep % 100 == 0:

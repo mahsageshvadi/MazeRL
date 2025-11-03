@@ -457,6 +457,7 @@ def train(args):
 
     for ep in range(1, args.episodes+1):
 
+        print(f"Episode {ep}")
         # per-episode curriculum
         if ep < 2000:
             env.dilate_radius = 5

@@ -457,7 +457,7 @@ def train(args):
 
     for ep in range(1, args.episodes+1):
 
-        print(f"Episode {ep}")
+
         # per-episode curriculum
         if ep < 2000:
             env.dilate_radius = 5
@@ -553,13 +553,13 @@ def train(args):
         rollout_buf = {k: [] for k in rollout_buf}
         ep_returns.append(ep_ret)
 
-        if ep % 100 == 0:
+    if ep % 100 == 0:
             avg_ret = float(np.mean(ep_returns[-100:]))
             avg_ccs = float(np.mean(ep_ccs_scores[-100:]))
             print(f"Episode {ep:6d} | return(avg100)={avg_ret:7.3f} | CCS(avg100)={avg_ccs:7.3f}")
             ppo.update_learning_rate(avg_ccs)
 
-        if args.save and ep % args.save_every == 0:
+    if args.save and ep % args.save_every == 0:
             torch.save(model.state_dict(), args.save)
             print(f"Saved to {args.save}")
 

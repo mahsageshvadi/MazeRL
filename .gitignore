@@ -20,3 +20,6 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+
+DSA/out_viz/
+DSA/__pycache__/

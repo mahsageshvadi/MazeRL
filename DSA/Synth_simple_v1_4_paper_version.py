@@ -1,12 +1,3 @@
-#!/usr/bin/env python3
-# Synth_simple_v1.2.py - Modified to match paper implementation
-# Based on: "Deep reinforcement learning for cerebral anterior vessel tree extraction"
-# Key changes:
-# - Paper-based reward function (Equation 3)
-# - PPO hyperparameters from paper (gamma=0.9, lr=1e-5, etc.)
-# - Minibatch size = 8 episodes
-# - Episode stopping criteria from paper
-# - Learning rate schedule from paper
 
 import argparse, math, random
 from dataclasses import dataclass
@@ -18,13 +9,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-# ---------- your curve generator ----------
 from Curve_Generator import CurveMaker
 
-# ---------- globals / utils ----------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ACTIONS_8 = [(-1, 0), (1, 0), (0,-1), (0, 1), (-1,-1), (-1,1), (1,-1), (1,1)]
-STEP_ALPHA = 2  # Paper uses scaling factor
+STEP_ALPHA = 2  
 CROP = 33
 
 def set_seeds(seed=123):
@@ -91,7 +80,6 @@ def mean_surface_distance(path_points, gt_poly):
         d.append(np.sqrt(np.min(d2)))
     return float(np.mean(d))
 
-# ---------- environment ----------
 @dataclass
 class CurveEpisode:
     img: np.ndarray
@@ -187,24 +175,19 @@ class CurveEnv:
         r = float(np.clip(r, -5.0, 5.0))
   
         
-        # Update local distance for next step
         self.L_prev_local = d_gt
         
-        # ============ PROGRESS TRACKING ============
         if idx > self.best_idx:
             self.best_idx = idx
         
-        # ============ EPISODE TERMINATION (Modified for 2D) ============
-        # (1) Track length exceeds 2x reference length (more lenient for learning)
+
         ref_length = len(self.ep.gt_poly)
         track_length = len(self.path_points)
         exceeded_length = track_length > 2.0 * ref_length
         
-        # (2) Agent is way off reference (more lenient during training)
-        # 3.6mm = 8 voxels @ 0.45mm spacing (doubled from paper's 1.8mm)
-        off_track = d_gt > 20  # More lenient for 2D synthetic curves
+
+        off_track = d_gt > 20  
         
-        # (3) Target reached (near end of curve)
         end_margin = 5
         reached_end = (self.best_idx >= len(self.ep.gt_poly) - 1 - end_margin)
         
@@ -213,11 +196,11 @@ class CurveEnv:
         
         done = exceeded_length or off_track or reached_end or timeout
         
-        # Terminal rewards
+        #  rewards
         if reached_end:
-            r += 50.0  # Success bonus (reduced from 100 to avoid dominating)
+            r += 50.0  
         elif off_track or exceeded_length:
-            r -= 5.0  # Penalty for failure
+            r -= 5.0  
         
         
         L_mean = mean_surface_distance(self.path_points, self.ep.gt_poly)
@@ -235,8 +218,8 @@ class CurveEnv:
             "ccs": ccs
         }
 
-# ---------- model / PPO ----------
-def gn(c, g=8):  # simple GroupNorm helper
+# model / PPO 
+def gn(c, g=8):  
     g = max(1, min(g, c))
     return nn.GroupNorm(g, c, eps=1e-5, affine=True)
 
@@ -264,7 +247,6 @@ class ActorCritic(nn.Module):
                     nn.init.constant_(m.bias, 0.0)
 
     def forward(self, x, ahist_onehot, hc=None):
-        # NaN/Inf guard on inputs
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
         ahist_onehot = torch.nan_to_num(ahist_onehot, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -306,7 +288,6 @@ class PPO:
         self.value_coef = value_coef
         self.max_grad_norm = max_grad_norm
         
-        # Learning rate scheduler (paper: halve when validation doesn't improve for 5 epochs)
         self.lr = lr
         self.lr_lower_bound = 1e-6
         self.patience = 5
@@ -365,7 +346,6 @@ class PPO:
 
                 logits, value, _ = self.model(x, A, None)
 
-                # Safety: if any NaNs slipped in, skip this minibatch
                 if not torch.isfinite(logits).all() or not torch.isfinite(value).all():
                     continue
 
@@ -386,7 +366,6 @@ class PPO:
                 nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
                 self.opt.step()
 
-# ---------- training / viewing ----------
 def train(args):
     set_seeds(123)
     env = CurveEnv(h=128, w=128, branches=args.branches, max_steps=400,
@@ -502,7 +481,6 @@ def view(args):
             steps += 1
     print(f"[VIEW] steps={steps}  L_end(local)={info['L_local']:.3f}  idx_end={info['idx']}  CCS={info['ccs']:.3f}")
 
-# ---------- CLI ----------
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--train", action="store_true")

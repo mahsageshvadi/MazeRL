@@ -1,23 +1,4 @@
 
-"""
-curve_generator.py
-------------------
-Generate simple 2D images containing one or more continuous curves
-(centerlines) as binary masks. Curves are drawn by sampling cubic
-Bezier / spline-like paths and stamping small discs on the canvas.
-
-Outputs:
-- images: float32 array in [0,1] (base intensity image; here it's just the curve)
-- masks:  uint8   array {0,1} (ground-truth centerline)
-You can add noise or thickness as needed.
-
-Usage:
->>> from curve_generator import CurveMaker
->>> cm = CurveMaker(h=128, w=128, seed=0)
->>> img, mask, pts = cm.sample_curve(branches=False)
-
-Author: ChatGPT (CurveWalk-RL starter)
-"""
 from __future__ import annotations
 import numpy as np
 import math, random

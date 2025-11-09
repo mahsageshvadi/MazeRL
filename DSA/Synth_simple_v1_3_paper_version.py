@@ -82,7 +82,6 @@ def curve_to_curve_distance(path_points, gt_poly):
     
     return total_dist
 
-# ---------- environment ----------
 @dataclass
 class CurveEpisode:
     img: np.ndarray
@@ -122,6 +121,7 @@ class CurveEnv:
         self.path_mask = np.zeros_like(mask, dtype=np.float32)
         self.path_points: List[Tuple[int,int]] = [self.agent]
         self.path_mask[self.agent] = 1.0
+        self.prev_index = -1
 
         # Progress & local distance memory
         self.best_idx = 0
@@ -161,19 +161,18 @@ class CurveEnv:
         idx, d_gt = nearest_gt_index(self.agent, self.ep.gt_poly)
         delta = d_gt - self.L_prev_local
         
-        # ============ REWARD COMPUTATION (Paper Equation 3) ============
         # Binary overlap metric
         on_curve = d_gt < self.overlap_dist
         B_t = 1.0 if on_curve else 0.0
         
         # Curve-to-curve distance reward (Equation 3 from paper)
-        eps = 1e-8
+        eps = 1
         delta_abs = abs(delta)
         
         if delta < 0:  # Getting closer to the curve
-            r = B_t - math.log(eps + delta_abs / self.D0)
+            r =  math.log(eps + delta_abs / self.D0) + B_t
         else:  # Getting farther or staying same distance
-            r = B_t + math.log(eps + delta_abs / self.D0)
+            r =  - math.log(eps + delta_abs / self.D0) + B_t
         
         # Clip reward to reasonable range
        # r = float(np.clip(r, -10.0, 10.0))
@@ -181,7 +180,12 @@ class CurveEnv:
         # Update local distance for next step
         self.L_prev_local = d_gt
         
-        # ============ PROGRESS TRACKING ============
+        if idx <= self.prev_index:
+            r -= 1.0
+        else:
+            r += 1.0
+        self.prev_index = idx
+
         if idx > self.best_idx:
             self.best_idx = idx
         
@@ -192,7 +196,7 @@ class CurveEnv:
         exceeded_length = track_length > 1.5 * ref_length
         
         # (2) Agent is off reference by 1.8mm (4 voxels with 0.45mm spacing)
-        off_track = d_gt > 1.8
+        off_track = d_gt > 10
         
         # (3) Target reached (near end of curve)
         end_margin = 5
@@ -205,7 +209,7 @@ class CurveEnv:
         
         # Terminal rewards
         if reached_end:
-            r += 100.0  # Success bonus
+            r += 10.0  # Success bonus
         
         # Compute CCS metric for monitoring
         L_t = curve_to_curve_distance(self.path_points, self.ep.gt_poly)
@@ -382,7 +386,6 @@ def train(args):
     nA = len(ACTIONS_8)
     model = ActorCritic(n_actions=nA, K=K).to(DEVICE)
     
-    # Paper hyperparameters
     ppo = PPO(model, lr=1e-5, gamma=0.9, lam=0.95, clip=0.2,
               epochs=10, minibatch=8, entropy_coef=args.entropy_coef)
 

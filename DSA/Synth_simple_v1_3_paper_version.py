@@ -430,8 +430,10 @@ def train(args):
 
         # Store CCS metric
         ep_ccs_scores.append(info.get('ccs', 0.0))
-
-        # GAE
+        rewards = np.array(traj["rew"], dtype=np.float32)
+        rewards = np.clip(rewards, -10, 10)  # Clip extreme rewards
+        traj["rew"] = rewards.tolist()
+                # GAE
         values = np.array(traj["val"] + [0.0], dtype=np.float32)
         adv, ret = PPO.compute_gae(np.array(traj["rew"], dtype=np.float32),
                                    values, traj["done"], 0.9, 0.95)

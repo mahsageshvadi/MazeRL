@@ -453,7 +453,7 @@ def train(args):
             print(f"Episode {ep:6d} | return(avg100)={avg_ret:7.3f} | CCS(avg100)={avg_ccs:7.3f}")
             
             # Update learning rate based on CCS (validation metric)
-            ppo.update_learning_rate(avg_ccs)
+        #    ppo.update_learning_rate(avg_ccs)
             
         if args.save and ep % args.save_every == 0:
             torch.save(model.state_dict(), args.save)

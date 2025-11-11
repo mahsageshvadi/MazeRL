@@ -275,8 +275,10 @@ class ActorCritic(nn.Module):
         return logits, value, hc
 
 class PPO:
-    def __init__(self, model: ActorCritic, n_actions=8, clip=0.2, gamma=0.9, lam=0.95,
-                 lr=1e-5, epochs=10, minibatch=8, entropy_coef=0.03, value_coef=0.5, max_grad_norm=1.0):
+    # In PPO.__init__, modify these:
+    def __init__(self, model: ActorCritic, n_actions=8, clip=0.2, gamma=0.98, lam=0.95,
+                lr=3e-5, epochs=4, minibatch=32, entropy_coef=0.08, 
+                value_coef=0.5, max_grad_norm=0.5):
         """
         Paper hyperparameters:
         - gamma = 0.9
@@ -500,7 +502,7 @@ def main():
     p.add_argument("--train", default=True, action="store_true")
     p.add_argument("--view",  action="store_true")
     p.add_argument("--episodes", type=int, default=5000)
-    p.add_argument("--entropy_coef", type=float, default=0.3)
+    p.add_argument("--entropy_coef", type=float, default=0.08)
     p.add_argument("--save", type=str, default="ckpt_curveppo.pth")
     p.add_argument("--save_every", type=int, default=2000)
     p.add_argument("--weights", type=str, default="")

@@ -500,7 +500,7 @@ def main():
     p.add_argument("--train", default=True, action="store_true")
     p.add_argument("--view",  action="store_true")
     p.add_argument("--episodes", type=int, default=5000)
-    p.add_argument("--entropy_coef", type=float, default=0.03)
+    p.add_argument("--entropy_coef", type=float, default=0.08)
     p.add_argument("--save", type=str, default="ckpt_curveppo.pth")
     p.add_argument("--save_every", type=int, default=2000)
     p.add_argument("--weights", type=str, default="")

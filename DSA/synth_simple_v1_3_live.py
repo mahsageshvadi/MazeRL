@@ -172,7 +172,7 @@ class CurveEpisode:
 
 class CurveEnv:
     def __init__(self, h=128, w=128, branches=False, max_steps=400,
-                 d0=2.0, dilate_radius=DILATE_RADIUS, start_mode: str = "begin", overlap_dist=1.0):
+                 d0=3.0, dilate_radius=DILATE_RADIUS, start_mode: str = "begin", overlap_dist=1.0):
         self.h, self.w = h, w
         self.max_steps = max_steps
         self.cm = CurveMaker(h=h, w=w, thickness=1.5, seed=None)
@@ -252,6 +252,9 @@ class CurveEnv:
         dy, dx = ACTIONS_8[a_idx]
         ny = clamp(self.agent[0] + dy*STEP_ALPHA, 0, self.h-1)
         nx = clamp(self.agent[1] + dx*STEP_ALPHA, 0, self.w-1)
+
+        print(f"ny: {ny}, nx: {nx}")
+        print(f"agent: {self.agent}")
         new_pos = (ny, nx)
 
         # Move & mark
@@ -269,26 +272,26 @@ class CurveEnv:
         B_t = 1.0 if on_curve else 0.0
          
         # Curve-to-curve distance reward (Equation 3 from paper)
-        eps = 1 
+        eps = 1e-4
         delta_abs = abs(delta)
  
         print("#############################")
         print(f"d_gt: {d_gt}")
         print(f"delta: {delta}")
+        print(f"delta_abs: {delta_abs / self.D0}")
         
-        if delta < 0:  # Getting closer to the curve
-            r =  math.log(eps + delta_abs / self.D0) + B_t
-        else:  # Getting farther or staying same distance
-            r =  - math.log(eps + delta_abs / self.D0) + B_t
-
-        print(f"r: {r}")
-        print(f"B_t: {B_t}")
-        print(f"INDEX: {idx}")
-        print("#############################")
+       # if delta < 0:  # Getting closer to the curve
+       #     r =  math.log(eps + delta_abs / self.D0) # + B_t
+       # else:  # Getting farther or staying same distance
+       #         r =  - math.log(eps + delta_abs / self.D0) #+ B_t
 
         # Clip reward to reasonable range
-       # r = float(np.clip(r, -10.0, 10.0))
+     #  r = float(np.clip(r, -10.0, 10.0))
         
+        if delta < 0:
+            r = math.log( delta_abs / self.D0)
+        else:
+            r = - math.log(delta_abs / self.D0)
         # Update local distance for next step
         self.L_prev_local = d_gt
         
@@ -325,6 +328,11 @@ class CurveEnv:
         L_t = dtw_curve_distance(self.path_points, self.ep.gt_poly)
         ccs = compute_ccs(L_t, self.L0)
         self.last_reward = r
+
+        print(f"r: {r}") 
+        print(f"B_t: {B_t}")
+        print(f"INDEX: {idx}")
+        print("#############################")
 
         return self.obs(), float(r), done, {
             "overlap": 1.0 if on_curve else 0.0,

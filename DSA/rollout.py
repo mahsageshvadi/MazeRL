@@ -115,6 +115,7 @@ except Exception as e:
             dy, dx = ACTIONS_8[a_idx]
             ny = clamp(self.agent[0] + dy*STEP_ALPHA, 0, self.h-1)
             nx = clamp(self.agent[1] + dx*STEP_ALPHA, 0, self.w-1)
+            print(f"ny: {ny}, nx: {nx}")
             new_pos = (ny, nx)
             self.prev = [self.agent, self.prev[0]]
             self.agent = new_pos

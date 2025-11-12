@@ -169,11 +169,14 @@ class CurveEnv:
         eps = 1
         delta_abs = abs(delta)
         
-        if delta < 0:  # Getting closer to the curve
-            r =  math.log(eps + delta_abs / self.D0) + B_t
-        else:  # Getting farther or staying same distance
-            r =  - math.log(eps + delta_abs / self.D0) + B_t
-        
+      #  if delta < 0:  # Getting closer to the curve
+        #    r =  math.log(eps + delta_abs / self.D0) + B_t
+      #  else:  # Getting farther or staying same distance
+       #     r =  - math.log(eps + delta_abs / self.D0) + B_t
+        if delta < 0:
+            r = math.log( delta_abs / self.D0)
+        else:
+            r = - math.log(delta_abs / self.D0)
         # Clip reward to reasonable range
        # r = float(np.clip(r, -10.0, 10.0))
         

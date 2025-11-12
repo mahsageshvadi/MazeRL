@@ -173,10 +173,13 @@ class CurveEnv:
         #    r =  math.log(eps + delta_abs / self.D0) + B_t
       #  else:  # Getting farther or staying same distance
        #     r =  - math.log(eps + delta_abs / self.D0) + B_t
+        eps = 1e-6
+        scale = delta_abs / (self.D0 + 1e-12)       # normalize & avoid div-by-zero
+        safe = eps + scale                           # ensure > 0 for log
         if delta < 0:
-            r = math.log( delta_abs / self.D0)
+            r = math.log(safe)                       # got closer
         else:
-            r = - math.log(delta_abs / self.D0)
+            r = -math.log(safe)
         # Clip reward to reasonable range
        # r = float(np.clip(r, -10.0, 10.0))
         

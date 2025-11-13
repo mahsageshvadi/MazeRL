@@ -167,11 +167,11 @@ class CurveEnv:
         
         improvement = (self.L_prev_local - d_gt) / (self.D0 + 1e-6)  # positive if closer
         B_t = 1.0 if d_gt < self.overlap_dist else 0.0               # on-curve bonus
-
+        print(improvement)
         # Progress along the polyline (forward motion)
         progress = 0.0
         if idx > self.prev_index:
-            progress = 0.2 * max(idx - self.prev_index, 1)  
+            progress = 0.2 #* max(idx - self.prev_index, 1)  
         elif idx < self.prev_index:
             progress = -0.2                                 
 

@@ -160,14 +160,6 @@ def dilate_mask(mask: np.ndarray, radius: int) -> np.ndarray:
                 out[ny, nx] = 1
     return out
 
-def _tangent_at(poly: np.ndarray, i: int) -> np.ndarray:
-    """Approximate GT tangent at index i (2D vector)."""
-    j0 = max(0, i-1); j1 = min(len(poly)-1, i+1)
-    t = poly[j1] - poly[j0]
-    n = np.linalg.norm(t) + 1e-6
-    return (t / n).astype(np.float32)
-
-
 @dataclass
 class CurveEpisode:
     img: np.ndarray
@@ -244,7 +236,6 @@ class CurveEnv:
         if self.L0 < 1e-6: self.L0 = 1.0
         self.last_reward = 0.0
         return self.obs()
-    
 
     def obs(self):
         p_t, p_1, p_2 = self.agent, self.prev[0], self.prev[1]
@@ -272,73 +263,67 @@ class CurveEnv:
         self.path_points.append(self.agent)
         self.path_mask[self.agent] = 1.0
 
-        # ----- Signals -----
+        # Local surface distance at current position
         idx, d_gt = nearest_gt_index(self.agent, self.ep.gt_poly)
+        delta = d_gt - self.L_prev_local
+         
+        # Binary overlap metric
+        on_curve = d_gt < self.overlap_dist
+        B_t = 1.0 if on_curve else 0.0
+         
+        # Curve-to-curve distance reward (Equation 3 from paper)
+        eps = 1e-4
+        delta_abs = abs(delta)
+ 
+        print("#############################")
+        print(f"d_gt: {d_gt}")
+        print(f"delta: {delta}")
+        print(f"delta_abs: {delta_abs / self.D0}")
+        
+       # if delta < 0:  # Getting closer to the curve
+       #     r =  math.log(eps + delta_abs / self.D0) # + B_t
+       # else:  # Getting farther or staying same distance
+       #         r =  - math.log(eps + delta_abs / self.D0) #+ B_t
 
-        # 1) Distance improvement (positive if you got closer)
-        impr = self.L_prev_local - d_gt                     # >0 is good
-        impr_term = math.tanh(impr / (self.D0 + 1e-6))      # [-1, 1]
+        # Clip reward to reasonable range
+     #  r = float(np.clip(r, -10.0, 10.0))
+        
+        if delta < 0:
+            r = math.log(eps + delta_abs / self.D0)
+        else:
+            r = - math.log(eps + delta_abs / self.D0)
+        # Update local distance for next step
+        self.L_prev_local = d_gt
+        
+        if idx <= self.prev_index:
+            r -= 1.0
+        else:
+            r += 1.0
+        self.prev_index = idx
 
-        # 2) Forward progress along GT (index advance)
-        raw_prog = max(0, idx - self.prev_index)            # 0,1,2...
-        prog_term = math.tanh(0.5 * raw_prog)               # [0, ~0.46 for +1]
-
-        # 3) Soft on-curve proximity
-        on_soft = math.exp(- (d_gt / (self.D0 + 1e-6))**2)  # (0,1]
-
-        # 4) Heading alignment with GT tangent
-        #    movement vector from previous to current agent pos
-        vy = float(self.agent[0] - self.prev[0][0])
-        vx = float(self.agent[1] - self.prev[0][1])
-        vmag = math.sqrt(vy*vy + vx*vx) + 1e-6
-        move_dir = np.array([vy/vmag, vx/vmag], dtype=np.float32)
-
-        tan = _tangent_at(self.ep.gt_poly, idx)             # unit vector
-        align = float(np.clip(move_dir @ tan, -1.0, 1.0))   # [-1,1]
-
-        # ----- Weighted sum (bounded & normalized) -----
-        w_impr, w_prog, w_on, w_align = 1.0, 0.6, 0.3, 0.2
-        step_cost = -0.01
-
-        r = (
-            w_impr  * impr_term +
-            w_prog  * prog_term +
-            w_on    * on_soft   +
-            w_align * align     +
-            step_cost
-        )
-
-        # Off-track penalty
-        if d_gt > self.off_track_thresh:
-            r += -2.0
-
-        # Terminal bonuses/penalties
         if idx > self.best_idx:
             self.best_idx = idx
+         
 
         ref_length = len(self.ep.gt_poly)
         track_length = len(self.path_points)
         exceeded_length = track_length > 1.5 * ref_length
+        
+        # (2) Agent is off reference by 1.8mm (4 voxels with 0.45mm spacing)
         off_track = d_gt > 5
+        
+        # (3) Target reached (near end of curve)
         end_margin = 5
         reached_end = (self.best_idx >= len(self.ep.gt_poly) - 1 - end_margin)
+        
+        # (4) Timeout
         timeout = (self.steps >= self.max_steps)
-        done = exceeded_length or off_track or reached_end or timeout
-
+        
+        done = exceeded_length  or off_track or reached_end or timeout
+        
+        # Terminal n rewards
         if reached_end:
-            r += 10.0                        # success bonus
-        elif exceeded_length:
-            r += -5.0                        # discourage wandering
-        elif timeout:
-            r += -1.0                        # mild
-
-        # Update trackers AFTER computing r
-        self.L_prev_local = d_gt
-        self.prev_index = max(self.prev_index, idx)         # monotone progress
-
-        # Keep a reasonable numeric range
-        r = float(np.clip(r, -10.0, 10.0))
-
+            r += 10.0  # Success bonus
 
         L_t = dtw_curve_distance(self.path_points, self.ep.gt_poly)
         ccs = compute_ccs(L_t, self.L0)
@@ -349,8 +334,8 @@ class CurveEnv:
         print(f"INDEX: {idx}")
         print("#############################")
 
-        return self.obs(), r, done, {
-            "overlap": 1.0 if d_gt < self.overlap_dist else 0.0,
+        return self.obs(), float(r), done, {
+            "overlap": 1.0 if on_curve else 0.0,
             "L_local": d_gt,
             "idx": idx,
             "reached_end": reached_end,
@@ -359,14 +344,7 @@ class CurveEnv:
             "off_track": off_track,
             "ccs": ccs,
             "agent": self.agent,
-            # NEW: for debugging reward balance
-            "impr_term": impr_term,
-            "prog_term": prog_term,
-            "on_soft": on_soft,
-            "align": align,
-            "r_total": r,
         }
-
 
 def inorm(c): 
     return nn.InstanceNorm2d(c, eps=1e-5, affine=True)

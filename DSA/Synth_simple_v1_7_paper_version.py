@@ -171,9 +171,9 @@ class CurveEnv:
         # Progress along the polyline (forward motion)
         progress = 0.0
         if idx > self.prev_index:
-            progress = 0.2 * min(idx - self.prev_index, 1)  # small positive bump
+            progress = 0.2 * max(idx - self.prev_index, 1)  
         elif idx < self.prev_index:
-            progress = -0.2                                  # discourage backtracking
+            progress = -0.2                                 
 
         # Final reward
         r = improvement + 0.5 * B_t + progress

@@ -181,7 +181,7 @@ class CurveEnv:
             progress = -0.2                                 
 
         # Final reward
-        r = improvement + 0.5 * B_t + progress
+        r = improvement + 0.2 * B_t + progress
 
         # Update local distance for next step
         self.L_prev_local = d_gt

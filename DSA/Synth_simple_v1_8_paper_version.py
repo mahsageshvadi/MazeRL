@@ -151,78 +151,61 @@ class CurveEnv:
         nx = clamp(self.agent[1] + dx*STEP_ALPHA, 0, self.w-1)
         new_pos = (ny, nx)
 
-        # Move & mark
         self.prev = [self.agent, self.prev[0]]
         self.agent = new_pos
         self.path_points.append(self.agent)
         self.path_mask[self.agent] = 1.0
 
-        # Find nearest point on GT curve
+        # Find nearest GT point
         idx, d_gt = nearest_gt_index(self.agent, self.ep.gt_poly)
         
-        # ============ IMPROVED REWARD FUNCTION ============
+        # ============ MUCH STRONGER REWARD ============
         r = 0.0
         
-        # 1. Distance reward: encourage staying close to the path
-        #    Exponential decay rewards being close
-        distance_reward = np.exp(-d_gt / self.D0)  # 1.0 when d=0, decays to ~0.37 at d=D0
-        r += distance_reward
-        
-        # 2. Progress reward: strongly encourage forward motion along the curve
-        progress_reward = 0.0
+        # 1. STRONG progress reward (primary signal)
         if idx > self.best_idx:
-            # Moved forward - big reward proportional to progress
-            progress_reward = 2.0 * (idx - self.best_idx)
-            self.best_idx = idx  # Update best progress
-        elif idx < self.best_idx - 5:  # Allow small backtracking
-            # Moved significantly backward - penalty
-            progress_reward = -1.0
+            # Reward proportional to forward progress
+            steps_forward = idx - self.best_idx
+            r += 5.0 * steps_forward  # Much larger than before
+            self.best_idx = idx
+        elif idx < self.best_idx - 3:
+            # Penalty for going backward
+            r -= 2.0
         
-        r += progress_reward
+        # 2. Distance-based reward (secondary signal)
+        # Only reward if close to path
+        if d_gt < 3.0:  # Within 3 pixels
+            r += 1.0 * (3.0 - d_gt) / 3.0  # 0 to 1.0
+        else:
+            r -= 0.5  # Penalty for being far
         
-        # 3. Velocity alignment: reward moving in the direction of the curve
-        if idx < len(self.ep.gt_poly) - 1:
-            # Direction to next GT point
-            target_dir = self.ep.gt_poly[idx + 1] - self.ep.gt_poly[idx]
-            target_dir = target_dir / (np.linalg.norm(target_dir) + 1e-6)
-            
-            # Agent's movement direction
-            agent_dir = np.array([dy, dx], dtype=np.float32)
-            agent_dir = agent_dir / (np.linalg.norm(agent_dir) + 1e-6)
-            
-            # Dot product: 1 when aligned, -1 when opposite
-            alignment = np.dot(agent_dir, target_dir)
-            r += 0.5 * alignment
+        # 3. Small time penalty
+        r -= 0.02
         
-        # 4. Step penalty: mild penalty to encourage efficiency
-        r -= 0.01
-        
-        # ============ EPISODE TERMINATION ============
+        # ============ TERMINATION ============
         ref_length = len(self.ep.gt_poly)
         track_length = len(self.path_points)
         
-        # Termination conditions
-        exceeded_length = track_length > 2.0 * ref_length  # More lenient
-        off_track = d_gt > 6.0  # Slightly tighter threshold
-        reached_end = idx >= len(self.ep.gt_poly) - 3  # Near the end
+        exceeded_length = track_length > 1.5 * ref_length
+        off_track = d_gt > 8.0
+        reached_end = self.best_idx >= len(self.ep.gt_poly) - 5
         timeout = (self.steps >= self.max_steps)
         
         done = exceeded_length or off_track or reached_end or timeout
         
         # Terminal rewards
-        if reached_end and d_gt < 3.0:  # Successfully reached end
-            completion_bonus = 20.0 * (self.best_idx / len(self.ep.gt_poly))
-            r += completion_bonus
+        if reached_end:
+            # HUGE bonus for completion
+            completion_ratio = self.best_idx / len(self.ep.gt_poly)
+            r += 50.0 * completion_ratio
         elif off_track:
-            r -= 5.0  # Penalty for going off track
-        elif exceeded_length:
-            r -= 3.0  # Penalty for inefficient path
+            r -= 10.0
         
-        # Update tracking
+        # Update
         self.L_prev_local = d_gt
         self.prev_index = idx
         
-        # Compute metrics
+        # Metrics
         L_t = curve_to_curve_distance(self.path_points, self.ep.gt_poly)
         mean_d = L_t / max(len(self.path_points), 1)
         ccs = 1.0 - (mean_d / (self.D0 + 1e-6))
@@ -233,12 +216,12 @@ class CurveEnv:
             "L_local": d_gt,
             "idx": idx,
             "best_idx": self.best_idx,
+            "progress_pct": self.best_idx / len(self.ep.gt_poly),
             "reached_end": reached_end,
             "timeout": timeout,
             "exceeded_length": exceeded_length,
             "off_track": off_track,
-            "ccs": ccs,
-            "progress_pct": self.best_idx / len(self.ep.gt_poly)
+            "ccs": ccs
         }
 
 # ---------- model / PPO ----------
@@ -251,43 +234,60 @@ class ActorCritic(nn.Module):
         super().__init__()
         self.n_actions = n_actions
         self.K = K
+        
+        # DEEPER CNN with residual connections
         self.cnn = nn.Sequential(
-            nn.Conv2d(4, 32, 3, padding=1, dilation=1), gn(32), nn.PReLU(),
-            nn.Conv2d(32,32, 3, padding=2, dilation=2), gn(32), nn.PReLU(),
-            nn.Conv2d(32,32, 3, padding=3, dilation=3), gn(32), nn.PReLU(),
-            nn.Conv2d(32,64, 1),                         gn(64), nn.PReLU(),
+            # Initial block
+            nn.Conv2d(4, 64, 3, padding=1), gn(64), nn.PReLU(),
+            nn.Conv2d(64, 64, 3, padding=1), gn(64), nn.PReLU(),
+            
+            # Dilated blocks for larger receptive field
+            nn.Conv2d(64, 64, 3, padding=2, dilation=2), gn(64), nn.PReLU(),
+            nn.Conv2d(64, 64, 3, padding=2, dilation=2), gn(64), nn.PReLU(),
+            
+            nn.Conv2d(64, 128, 3, padding=4, dilation=4), gn(128), nn.PReLU(),
+            nn.Conv2d(128, 128, 3, padding=4, dilation=4), gn(128), nn.PReLU(),
+            
+            # Output
+            nn.Conv2d(128, 128, 1), gn(128), nn.PReLU(),
         )
+        
         self.gap = nn.AdaptiveAvgPool2d((1,1))
-        self.lstm = nn.LSTM(input_size=n_actions, hidden_size=64, num_layers=1, batch_first=True)
-        self.actor = nn.Sequential(nn.Linear(64+64,128), nn.PReLU(), nn.Linear(128, n_actions))
-        self.critic = nn.Sequential(nn.Linear(64+64,128), nn.PReLU(), nn.Linear(128, 1))
+        
+        # Larger LSTM
+        self.lstm = nn.LSTM(
+            input_size=n_actions, 
+            hidden_size=128,  # Increased from 64
+            num_layers=2,      # Increased from 1
+            batch_first=True,
+            dropout=0.1
+        )
+        
+        # Deeper heads
+        self.actor = nn.Sequential(
+            nn.Linear(128+128, 256), 
+            nn.PReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 128),
+            nn.PReLU(),
+            nn.Linear(128, n_actions)
+        )
+        
+        self.critic = nn.Sequential(
+            nn.Linear(128+128, 256),
+            nn.PReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 128),
+            nn.PReLU(),
+            nn.Linear(128, 1)
+        )
 
-        # safe init
+        # Better initialization
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
-                nn.init.kaiming_uniform_(m.weight, a=0.25, nonlinearity='leaky_relu')
+                nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
-
-    def forward(self, x, ahist_onehot, hc=None):
-        # NaN/Inf guard on inputs
-        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        ahist_onehot = torch.nan_to_num(ahist_onehot, nan=0.0, posinf=0.0, neginf=0.0)
-
-        z = self.cnn(x)                            # (B,64,33,33)
-        z = self.gap(z).squeeze(-1).squeeze(-1)    # (B,64)
-        out, hc = self.lstm(ahist_onehot, hc)      # (B,K,64)
-        h_last = out[:, -1, :]                     # (B,64)
-        h = torch.cat([z, h_last], dim=1)          # (B,128)
-
-        logits = self.actor(h)                     # (B,8)
-        value  = self.critic(h).squeeze(-1)        # (B,)
-
-        # Clamp logits to avoid inf/nan in softmax
-        logits = torch.nan_to_num(logits, nan=0.0, posinf=20.0, neginf=-20.0)
-        logits = logits.clamp(-20, 20)
-        value  = torch.nan_to_num(value, nan=0.0, posinf=0.0, neginf=0.0)
-        return logits, value, hc
 
 class PPO:
     # In PPO.__init__, modify these:
@@ -403,11 +403,23 @@ def train(args):
     nA = len(ACTIONS_8)
     model = ActorCritic(n_actions=nA, K=K).to(DEVICE)
     
-    ppo = PPO(model, lr=1e-5, gamma=0.9, lam=0.95, clip=0.2,
-              epochs=10, minibatch=8, entropy_coef=args.entropy_coef)
+    ppo = PPO(
+            model, 
+            lr=3e-4,           # Much higher! (was 1e-5)
+            gamma=0.99,         # Higher discount (was 0.9)
+            lam=0.95,
+            clip=0.2,
+            epochs=4,           # Fewer epochs (was 10)
+            minibatch=64,       # Larger batches (was 8)
+            entropy_coef=0.01,  # Much lower (was 0.08)
+            value_coef=0.5,
+            max_grad_norm=0.5
+        )
 
     ep_returns = []
     ep_ccs_scores = []
+    ep_progress = []  # NEW: track progress %
+    ep_steps = []     # NEW: track episode length
     
     for ep in range(1, args.episodes+1):
         obs = env.reset()
@@ -415,19 +427,21 @@ def train(args):
         ahist = []
         traj = {"obs":[], "ahist":[], "act":[], "logp":[], "val":[], "rew":[], "done":[]}
         ep_ret = 0.0
+        steps_in_ep = 0
 
         while not done:
             x = torch.tensor(obs[None], dtype=torch.float32, device=DEVICE)
             A = fixed_window_history(ahist, K, nA)[None, ...]
             A_t = torch.tensor(A, dtype=torch.float32, device=DEVICE)
 
-            logits, value, _ = model(x, A_t, None)
-            logits = torch.nan_to_num(logits, nan=0.0, posinf=20.0, neginf=-20.0).clamp(-20, 20)
-            dist = Categorical(logits=logits)
+            with torch.no_grad():
+                logits, value, _ = model(x, A_t, None)
+                logits = torch.nan_to_num(logits, nan=0.0, posinf=20.0, neginf=-20.0).clamp(-20, 20)
+                dist = Categorical(logits=logits)
 
-            action = int(dist.sample().item())
-            logp = float(dist.log_prob(torch.tensor(action, device=DEVICE)).item())
-            val = float(value.item())
+                action = int(dist.sample().item())
+                logp = float(dist.log_prob(torch.tensor(action, device=DEVICE)).item())
+                val = float(value.item())
 
             obs2, r, done, info = env.step(action)
 
@@ -444,16 +458,21 @@ def train(args):
 
             obs = obs2
             ep_ret += r
+            steps_in_ep += 1
 
-        # Store CCS metric
+        # Store metrics
         ep_ccs_scores.append(info.get('ccs', 0.0))
+        ep_progress.append(info.get('progress_pct', 0.0))
+        ep_steps.append(steps_in_ep)
+        
+        # Clip rewards
         rewards = np.array(traj["rew"], dtype=np.float32)
-        rewards = np.clip(rewards, -10, 10)  # Clip extreme rewards
+        rewards = np.clip(rewards, -20, 20)
         traj["rew"] = rewards.tolist()
-                # GAE
+        
+        # GAE
         values = np.array(traj["val"] + [0.0], dtype=np.float32)
-        adv, ret = PPO.compute_gae(np.array(traj["rew"], dtype=np.float32),
-                                   values, traj["done"], 0.9, 0.95)
+        adv, ret = PPO.compute_gae(rewards, values, traj["done"], 0.99, 0.95)
 
         buf = {
             "obs":   np.array(traj["obs"], dtype=np.float32),
@@ -466,21 +485,26 @@ def train(args):
         ppo.update(buf)
         ep_returns.append(ep_ret)
 
-        if ep % 100 == 0:
+        if ep % 50 == 0:  # More frequent logging
             avg_ret = float(np.mean(ep_returns[-100:]))
             avg_ccs = float(np.mean(ep_ccs_scores[-100:]))
-            print(f"Episode {ep:6d} | return(avg100)={avg_ret:7.3f} | CCS(avg100)={avg_ccs:7.3f}")
+            avg_prog = float(np.mean(ep_progress[-100:]))
+            avg_steps = float(np.mean(ep_steps[-100:]))
             
-            # Update learning rate based on CCS (validation metric)
-        #    ppo.update_learning_rate(avg_ccs)
+            print(f"Ep {ep:5d} | Ret={avg_ret:7.2f} | CCS={avg_ccs:+.3f} | "
+                  f"Prog={avg_prog:.1%} | Steps={avg_steps:.0f}")
+            
+        # Curriculum advancement
+        if ep == 1000 and hasattr(env, 'curriculum_stage'):
+            env.curriculum_stage = 1
+            print("→ Curriculum Stage 1")
+        elif ep == 3000 and hasattr(env, 'curriculum_stage'):
+            env.curriculum_stage = 2
+            print("→ Curriculum Stage 2")
             
         if args.save and ep % args.save_every == 0:
             torch.save(model.state_dict(), args.save)
             print(f"Saved to {args.save}")
-
-    if args.save:
-        torch.save(model.state_dict(), args.save)
-        print(f"Saved final weights to {args.save}")
 
 def view(args):
     set_seeds(123)

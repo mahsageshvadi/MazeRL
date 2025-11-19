@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-from Curve_Generator_noisy import CurveMaker
+from Curve_Generator_noisy import CurveMakerDSA
 
 # ---------- globals / utils ----------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -67,7 +67,7 @@ class CurveEnv:
     def __init__(self, h=128, w=128, branches=False, max_steps=200):
         self.h, self.w = h, w
         self.max_steps = max_steps
-        self.cm = CurveMaker(h=h, w=w, thickness=1.5, seed=None)
+        self.cm = CurveMakerDSA(h=h, w=w, thickness=1.5, seed=None)
         self.branches = branches
         self.reset()
 
@@ -170,7 +170,7 @@ class CurveEnv:
         # Termination
         dist_to_end = np.sqrt((self.agent[0]-self.ep.gt_poly[-1][0])**2 + (self.agent[1]-self.ep.gt_poly[-1][1])**2)
         reached_end = dist_to_end < 5.0
-        off_track = L_t > 6.0
+        off_track = L_t > 5.0
         too_long = len(self.path_points) > len(self.ep.gt_poly) * 2.0
         
         done = reached_end or off_track or too_long or (self.steps >= self.max_steps)

@@ -5,7 +5,7 @@ import argparse
 from Synth_simple_v1_9_paper_version_gemini import CurveEnv, AsymmetricActorCritic, update_ppo, DEVICE, fixed_window_history, ACTIONS_8
 
 # Import the NEW Noisy Generator
-from Curve_Generator_noisy import CurveMakerDSA
+from Curve_Generator_noisy import CurveMaker
 
 def train_dsa_adapt(args):
     print("--- STARTING DSA DOMAIN ADAPTATION ---")
@@ -16,7 +16,7 @@ def train_dsa_adapt(args):
         def __init__(self, h=128, w=128, branches=False):
             super().__init__(h, w, branches)
             # SWAP THE GENERATOR HERE
-            self.cm = CurveMakerDSA(h=h, w=w, thickness=1.5, seed=None)
+            self.cm = CurveMaker(h=h, w=w, thickness=1.5, seed=None)
             
     env = CurveEnvDSA(h=128, w=128, branches=args.branches)
     

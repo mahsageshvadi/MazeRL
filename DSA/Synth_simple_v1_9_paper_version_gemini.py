@@ -22,6 +22,12 @@ def set_seeds(seed=123):
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     if DEVICE == "cuda": torch.cuda.manual_seed_all(seed)
 
+def nearest_gt_index(pt, poly):
+    """Return the index of the closest point on the polyline."""
+    dif = poly - np.array(pt, dtype=np.float32)
+    d2 = np.sum(dif * dif, axis=1)
+    return int(np.argmin(d2))
+
 def clamp(v, lo, hi): return max(lo, min(v, hi))
 
 def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
@@ -88,6 +94,11 @@ class CurveEnv:
         self.agent = (float(p0[0]), float(p0[1]))
         self.history_pos = [self.agent] * 3 
         self.steps = 0
+        
+        # --- NEW: Track Progress Index ---
+        self.current_idx = 0
+        self.prev_idx = 0
+        # ---------------------------------
 
         self.path_mask = np.zeros_like(mask, dtype=np.float32)
         self.path_points = [self.agent]
@@ -112,7 +123,26 @@ class CurveEnv:
 
         return {"actor": actor_obs, "critic_gt": gt_obs}
 
-    def step(self, a_idx: int):
+def reset(self):
+        # ... (keep existing code) ...
+        self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly)
+
+        self.agent = (float(p0[0]), float(p0[1]))
+        self.history_pos = [self.agent] * 3 
+        self.steps = 0
+        
+        # --- NEW: Track Progress Index ---
+        self.current_idx = 0
+        self.prev_idx = 0
+        # ---------------------------------
+
+        self.path_mask = np.zeros_like(mask, dtype=np.float32)
+        self.path_points = [self.agent]
+        self.L_prev = get_distance_to_poly(self.agent, self.ep.gt_poly)
+        
+        return self.obs()
+
+def step(self, a_idx: int):
         self.steps += 1
         dy, dx = ACTIONS_8[a_idx]
         ny = clamp(self.agent[0] + dy * STEP_ALPHA, 0, self.h-1)
@@ -121,32 +151,59 @@ class CurveEnv:
         
         self.history_pos.append(self.agent)
         self.path_points.append(self.agent)
-        
         ir, ic = int(ny), int(nx)
         self.path_mask[ir, ic] = 1.0
 
+        # --- CALCULATE REWARD ---
+        
+        # 1. Distance Logic
         L_t = get_distance_to_poly(self.agent, self.ep.gt_poly)
-        B_t = 1.0 if L_t < 2.0 else 0.0
         dist_diff = abs(L_t - self.L_prev)
         
-        if L_t < self.L_prev:
-            r = B_t + np.log(EPSILON + dist_diff)
-            r = float(np.clip(r, -5.0, 5.0))
-        else:
-            r = B_t - np.log(EPSILON + dist_diff)
-            r = float(np.clip(r, -5.0, 5.0))
-
-        self.L_prev = L_t
+        # 2. Progress Logic (Are we moving further down the list of points?)
+        best_idx = nearest_gt_index(self.agent, self.ep.gt_poly)
+        progress_delta = best_idx - self.prev_idx
         
+        # Base Reward: Log distance change (Paper Eq 3)
+        if L_t < self.L_prev:
+            r = np.log(EPSILON + dist_diff)
+        else:
+            r = -np.log(EPSILON + dist_diff)
+        
+        # Clamp the log reward to prevent explosion
+        r = float(np.clip(r, -2.0, 2.0))
+
+        # --- CRITICAL FIXES ---
+        
+        # Fix A: Only give the "On Curve" bonus if they made PROGRESS
+        # If they are just sitting there (progress <= 0), no bonus.
+        on_curve = (L_t < 2.0)
+        if on_curve and progress_delta > 0:
+            r += 1.0  # Good job, you are on the curve AND moving forward
+        elif on_curve and progress_delta <= 0:
+            r -= 0.1  # You are loitering. Move!
+            
+        # Fix B: Add a small "Step Cost" to encourage speed
+        r -= 0.05 
+
+        # Fix C: Increase Win Bonus significantly
         dist_to_end = np.sqrt((self.agent[0]-self.ep.gt_poly[-1][0])**2 + (self.agent[1]-self.ep.gt_poly[-1][1])**2)
         reached_end = dist_to_end < 5.0
+        
+        if reached_end:
+            r += 50.0 # Make winning irresistible
+            
+        # -----------------------
+
+        self.L_prev = L_t
+        self.prev_idx = max(self.prev_idx, best_idx) # Ratchet mechanism: only remember furthest point
+        
         off_track = L_t > 6.0
-        too_long = len(self.path_points) > len(self.ep.gt_poly) * 1.5
+        too_long = len(self.path_points) > len(self.ep.gt_poly) * 2.0 # Allow a bit more wiggle room
         
         done = reached_end or off_track or too_long or (self.steps >= self.max_steps)
         
-        if reached_end: r += 10.0
-        if off_track:   r -= 2.0
+        if off_track: r -= 5.0
 
         info = {"reached_end": reached_end}
         return self.obs(), r, done, info
@@ -348,7 +405,7 @@ def train(args):
             avg_r = np.mean(ep_returns[-50:])
             avg_s = np.mean(success_rate[-50:])
             print(f"Ep {ep} | Avg Rew: {avg_r:.2f} | Success Rate: {avg_s:.2f}")
-            
+
     torch.save(model.state_dict(), "ppo_curve_agent.pth")
     print("Model saved.")
 

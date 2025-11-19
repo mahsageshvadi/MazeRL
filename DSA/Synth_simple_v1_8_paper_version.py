@@ -289,6 +289,26 @@ class ActorCritic(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
 
+    def forward(self, x, ahist_onehot, hc=None):
+        # NaN/Inf guard on inputs
+        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        ahist_onehot = torch.nan_to_num(ahist_onehot, nan=0.0, posinf=0.0, neginf=0.0)
+
+        z = self.cnn(x)                            # (B,64,33,33)
+        z = self.gap(z).squeeze(-1).squeeze(-1)    # (B,64)
+        out, hc = self.lstm(ahist_onehot, hc)      # (B,K,64)
+        h_last = out[:, -1, :]                     # (B,64)
+        h = torch.cat([z, h_last], dim=1)          # (B,128)
+
+        logits = self.actor(h)                     # (B,8)
+        value  = self.critic(h).squeeze(-1)        # (B,)
+
+        # Clamp logits to avoid inf/nan in softmax
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=20.0, neginf=-20.0)
+        logits = logits.clamp(-20, 20)
+        value  = torch.nan_to_num(value, nan=0.0, posinf=0.0, neginf=0.0)
+        return logits, value, hc
+
 class PPO:
     # In PPO.__init__, modify these:
     def __init__(self, model: ActorCritic, n_actions=8, clip=0.2, gamma=0.98, lam=0.95,
@@ -415,7 +435,7 @@ def train(args):
             value_coef=0.5,
             max_grad_norm=0.5
         )
-
+        
     ep_returns = []
     ep_ccs_scores = []
     ep_progress = []  # NEW: track progress %

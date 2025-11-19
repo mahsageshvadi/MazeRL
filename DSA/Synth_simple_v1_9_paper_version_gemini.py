@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-from Curve_Generator import CurveMaker
+from Curve_Generator_noisy import CurveMaker
 
 # ---------- globals / utils ----------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -169,7 +169,7 @@ class CurveEnv:
         
         # Termination
         dist_to_end = np.sqrt((self.agent[0]-self.ep.gt_poly[-1][0])**2 + (self.agent[1]-self.ep.gt_poly[-1][1])**2)
-        reached_end = dist_to_end < 1.0
+        reached_end = dist_to_end < 5.0
         off_track = L_t > 6.0
         too_long = len(self.path_points) > len(self.ep.gt_poly) * 2.0
         

@@ -61,6 +61,7 @@ class CurveEpisode:
     img: np.ndarray
     mask: np.ndarray
     gt_poly: np.ndarray
+    start: Tuple[int, int]  
     
 class CurveEnv:
     def __init__(self, h=128, w=128, branches=False, max_steps=200):

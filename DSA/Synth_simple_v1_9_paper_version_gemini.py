@@ -27,7 +27,7 @@ def nearest_gt_index(pt, poly):
     dif = poly - np.array(pt, dtype=np.float32)
     d2 = np.sum(dif * dif, axis=1)
     return int(np.argmin(d2))
-
+    
 def clamp(v, lo, hi): return max(lo, min(v, hi))
 
 def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
@@ -80,6 +80,8 @@ class CurveEnv:
             r, c = int(pt[0]), int(pt[1])
             if 0<=r<self.h and 0<=c<self.w:
                 self.gt_map[r,c] = 1.0
+        
+        # Add branches as distractors (-1.0)
         if len(pts_all) > 1:
             for i in range(1, len(pts_all)):
                 for pt in pts_all[i]:
@@ -89,16 +91,16 @@ class CurveEnv:
                             self.gt_map[r,c] = -1.0
 
         p0 = gt_poly[0].astype(int)
-        self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly)
+        self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly, start=(p0[0], p0[1]))
 
         self.agent = (float(p0[0]), float(p0[1]))
         self.history_pos = [self.agent] * 3 
         self.steps = 0
-        
-        # --- NEW: Track Progress Index ---
+
+        # --- PROGRESS TRACKING ---
         self.current_idx = 0
         self.prev_idx = 0
-        # ---------------------------------
+        # -------------------------
 
         self.path_mask = np.zeros_like(mask, dtype=np.float32)
         self.path_points = [self.agent]
@@ -123,26 +125,8 @@ class CurveEnv:
 
         return {"actor": actor_obs, "critic_gt": gt_obs}
 
-def reset(self):
-        # ... (keep existing code) ...
-        self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly)
-
-        self.agent = (float(p0[0]), float(p0[1]))
-        self.history_pos = [self.agent] * 3 
-        self.steps = 0
-        
-        # --- NEW: Track Progress Index ---
-        self.current_idx = 0
-        self.prev_idx = 0
-        # ---------------------------------
-
-        self.path_mask = np.zeros_like(mask, dtype=np.float32)
-        self.path_points = [self.agent]
-        self.L_prev = get_distance_to_poly(self.agent, self.ep.gt_poly)
-        
-        return self.obs()
-
-def step(self, a_idx: int):
+    # CHECK INDENTATION: def step must be aligned with def reset
+    def step(self, a_idx: int):
         self.steps += 1
         dy, dx = ACTIONS_8[a_idx]
         ny = clamp(self.agent[0] + dy * STEP_ALPHA, 0, self.h-1)
@@ -151,59 +135,51 @@ def step(self, a_idx: int):
         
         self.history_pos.append(self.agent)
         self.path_points.append(self.agent)
+        
         ir, ic = int(ny), int(nx)
         self.path_mask[ir, ic] = 1.0
 
-        # --- CALCULATE REWARD ---
-        
-        # 1. Distance Logic
+        # --- REWARD LOGIC ---
         L_t = get_distance_to_poly(self.agent, self.ep.gt_poly)
         dist_diff = abs(L_t - self.L_prev)
         
-        # 2. Progress Logic (Are we moving further down the list of points?)
         best_idx = nearest_gt_index(self.agent, self.ep.gt_poly)
         progress_delta = best_idx - self.prev_idx
         
-        # Base Reward: Log distance change (Paper Eq 3)
+        # Base: Log Distance Change
         if L_t < self.L_prev:
             r = np.log(EPSILON + dist_diff)
         else:
             r = -np.log(EPSILON + dist_diff)
-        
-        # Clamp the log reward to prevent explosion
         r = float(np.clip(r, -2.0, 2.0))
 
-        # --- CRITICAL FIXES ---
-        
-        # Fix A: Only give the "On Curve" bonus if they made PROGRESS
-        # If they are just sitting there (progress <= 0), no bonus.
         on_curve = (L_t < 2.0)
+        
+        # Bonus for moving forward along the curve
         if on_curve and progress_delta > 0:
-            r += 1.0  # Good job, you are on the curve AND moving forward
+            r += 1.0
+        # Penalty for loitering (on curve but not moving forward)
         elif on_curve and progress_delta <= 0:
-            r -= 0.1  # You are loitering. Move!
+            r -= 0.1
             
-        # Fix B: Add a small "Step Cost" to encourage speed
+        # Step Cost (Time Penalty)
         r -= 0.05 
 
-        # Fix C: Increase Win Bonus significantly
+        self.L_prev = L_t
+        self.prev_idx = max(self.prev_idx, best_idx)
+        
+        # Termination
         dist_to_end = np.sqrt((self.agent[0]-self.ep.gt_poly[-1][0])**2 + (self.agent[1]-self.ep.gt_poly[-1][1])**2)
         reached_end = dist_to_end < 5.0
-        
-        if reached_end:
-            r += 50.0 # Make winning irresistible
-            
-        # -----------------------
-
-        self.L_prev = L_t
-        self.prev_idx = max(self.prev_idx, best_idx) # Ratchet mechanism: only remember furthest point
-        
         off_track = L_t > 6.0
-        too_long = len(self.path_points) > len(self.ep.gt_poly) * 2.0 # Allow a bit more wiggle room
+        too_long = len(self.path_points) > len(self.ep.gt_poly) * 2.0
         
         done = reached_end or off_track or too_long or (self.steps >= self.max_steps)
         
-        if off_track: r -= 5.0
+        if reached_end:
+            r += 50.0 # BIG WIN BONUS
+        if off_track:
+            r -= 5.0
 
         info = {"reached_end": reached_end}
         return self.obs(), r, done, info

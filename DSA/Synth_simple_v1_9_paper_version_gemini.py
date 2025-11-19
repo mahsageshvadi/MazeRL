@@ -348,6 +348,9 @@ def train(args):
             avg_r = np.mean(ep_returns[-50:])
             avg_s = np.mean(success_rate[-50:])
             print(f"Ep {ep} | Avg Rew: {avg_r:.2f} | Success Rate: {avg_s:.2f}")
+            
+    torch.save(model.state_dict(), "ppo_curve_agent.pth")
+    print("Model saved.")
 
 def main():
     p = argparse.ArgumentParser()

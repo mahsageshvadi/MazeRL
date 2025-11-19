@@ -2,8 +2,11 @@
 import argparse, math, random
 from dataclasses import dataclass
 from typing import List, Tuple
+import os
 
 import numpy as np
+import matplotlib.pyplot as plt # Needed for view()
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -61,6 +64,7 @@ class CurveEpisode:
     img: np.ndarray
     mask: np.ndarray
     gt_poly: np.ndarray
+    start: Tuple[int,int] # Added to fix TypeError
     
 class CurveEnv:
     def __init__(self, h=128, w=128, branches=False, max_steps=200):
@@ -91,6 +95,7 @@ class CurveEnv:
                             self.gt_map[r,c] = -1.0
 
         p0 = gt_poly[0].astype(int)
+        # Fixed instantiation
         self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly, start=(p0[0], p0[1]))
 
         self.agent = (float(p0[0]), float(p0[1]))
@@ -125,7 +130,7 @@ class CurveEnv:
 
         return {"actor": actor_obs, "critic_gt": gt_obs}
 
-    # CHECK INDENTATION: def step must be aligned with def reset
+    # Fixed Indentation: step is now a method of CurveEnv
     def step(self, a_idx: int):
         self.steps += 1
         dy, dx = ACTIONS_8[a_idx]
@@ -181,7 +186,7 @@ class CurveEnv:
         if off_track:
             r -= 5.0
 
-        info = {"reached_end": reached_end}
+        info = {"reached_end": reached_end, "steps": self.steps}
         return self.obs(), r, done, info
 
 def gn(c): return nn.GroupNorm(4, c)
@@ -231,7 +236,6 @@ class AsymmetricActorCritic(nn.Module):
         return logits, value, hc_actor, hc_critic
 
 def update_ppo(ppo_opt, model, buf_list, clip=0.2, epochs=4, minibatch=32):
-    # Flatten the buffer list (which is a list of dicts) into single arrays
     obs_a = torch.tensor(np.concatenate([x['obs']['actor'] for x in buf_list]), dtype=torch.float32, device=DEVICE)
     obs_c = torch.tensor(np.concatenate([x['obs']['critic_gt'] for x in buf_list]), dtype=torch.float32, device=DEVICE)
     ahist = torch.tensor(np.concatenate([x['ahist'] for x in buf_list]), dtype=torch.float32, device=DEVICE)
@@ -240,8 +244,6 @@ def update_ppo(ppo_opt, model, buf_list, clip=0.2, epochs=4, minibatch=32):
     adv   = torch.tensor(np.concatenate([x['adv'] for x in buf_list]), dtype=torch.float32, device=DEVICE)
     ret   = torch.tensor(np.concatenate([x['ret'] for x in buf_list]), dtype=torch.float32, device=DEVICE)
 
-    # --- FIX 1: SAFE NORMALIZATION ---
-    # If batch is too small or std is 0, don't divide by it.
     if adv.numel() > 1:
         adv_std = adv.std()
         if torch.isnan(adv_std) or adv_std < 1e-6:
@@ -257,12 +259,10 @@ def update_ppo(ppo_opt, model, buf_list, clip=0.2, epochs=4, minibatch=32):
         np.random.shuffle(idxs)
         for s in range(0, N, minibatch):
             mb = idxs[s:s+minibatch]
-            # Ensure we don't have empty batch (rare)
             if len(mb) == 0: continue
 
             logits, val, _, _ = model(obs_a[mb], obs_c[mb], ahist[mb])
             
-            # --- FIX 2: Logit Clamping (prevent inf) ---
             logits = torch.clamp(logits, -20, 20)
             
             dist = Categorical(logits=logits)
@@ -281,7 +281,6 @@ def update_ppo(ppo_opt, model, buf_list, clip=0.2, epochs=4, minibatch=32):
             ppo_opt.zero_grad()
             loss.backward()
             
-            # --- FIX 3: Grad Clipping ---
             nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             ppo_opt.step()
 
@@ -297,16 +296,15 @@ def train(args):
     ep_returns = []
     success_rate = []
     
-    # Buffer to accumulate multiple episodes
     batch_buffer = [] 
-    BATCH_SIZE_EPISODES = 8  # Paper says 8 episodes per update
+    BATCH_SIZE_EPISODES = 8 
 
+    print("Starting training...")
     for ep in range(1, args.episodes+1):
         obs_dict = env.reset()
         done = False
         ahist = []
         
-        # Temporary storage for this episode
         ep_traj = {"obs":{'actor':[], 'critic_gt':[]}, "ahist":[], "act":[], "logp":[], "val":[], "rew":[]}
         
         ep_ret = 0
@@ -319,7 +317,6 @@ def train(args):
 
             with torch.no_grad():
                 logits, value, _, _ = model(obs_a, obs_c, A_t)
-                # Clamp logits for safety in sampling
                 logits = torch.clamp(logits, -20, 20)
                 dist = Categorical(logits=logits)
                 action = dist.sample().item()
@@ -344,10 +341,7 @@ def train(args):
         ep_returns.append(ep_ret)
         success_rate.append(1 if info['reached_end'] else 0)
         
-        # Only add to buffer if episode had meaningful length (>2 steps)
-        # This filters out instant-death scenarios that cause NaNs
         if len(ep_traj["rew"]) > 2:
-            # GAE Calculation per episode
             rews = np.array(ep_traj["rew"])
             vals = np.array(ep_traj["val"] + [0.0])
             delta = rews + 0.9 * vals[1:] - vals[:-1]
@@ -358,7 +352,6 @@ def train(args):
                 adv[t] = acc
             ret = adv + vals[:-1]
             
-            # Package episode data
             final_ep_data = {
                 "obs": {
                     "actor": np.array(ep_traj["obs"]['actor']),
@@ -372,10 +365,9 @@ def train(args):
             }
             batch_buffer.append(final_ep_data)
         
-        # UPDATE: If we have collected 8 episodes, update the model
         if len(batch_buffer) >= BATCH_SIZE_EPISODES:
             update_ppo(opt, model, batch_buffer)
-            batch_buffer = [] # Clear buffer
+            batch_buffer = [] 
 
         if ep % 50 == 0:
             avg_r = np.mean(ep_returns[-50:])
@@ -383,14 +375,83 @@ def train(args):
             print(f"Ep {ep} | Avg Rew: {avg_r:.2f} | Success Rate: {avg_s:.2f}")
 
     torch.save(model.state_dict(), "ppo_curve_agent.pth")
-    print("Model saved.")
+    print("Model saved to ppo_curve_agent.pth")
+
+def view(args):
+    print("--- Starting Evaluation Rollout ---")
+    set_seeds(random.randint(0, 1000)) 
+    
+    env = CurveEnv(h=128, w=128, branches=args.branches)
+    obs_dict = env.reset()
+    
+    K = 8
+    nA = len(ACTIONS_8)
+    model = AsymmetricActorCritic(n_actions=nA, K=K).to(DEVICE)
+    
+    if args.load and os.path.exists(args.load):
+        model.load_state_dict(torch.load(args.load, map_location=DEVICE))
+        print(f"Loaded weights from {args.load}")
+    else:
+        print("Warning: No weights loaded, running with random initialization.")
+        
+    model.eval()
+    ahist = []
+    done = False
+    
+    print("Agent is tracking...")
+    
+    while not done:
+        obs_a = torch.tensor(obs_dict['actor'][None], dtype=torch.float32, device=DEVICE)
+        dummy_gt = torch.zeros((1, 1, 33, 33), dtype=torch.float32, device=DEVICE)
+        
+        A = fixed_window_history(ahist, K, nA)[None, ...]
+        A_t = torch.tensor(A, dtype=torch.float32, device=DEVICE)
+
+        with torch.no_grad():
+            logits, _, _, _ = model(obs_a, dummy_gt, A_t)
+            action = torch.argmax(logits, dim=1).item()
+
+        obs_dict, r, done, info = env.step(action)
+        
+        a_onehot = np.zeros(nA); a_onehot[action] = 1.0
+        ahist.append(a_onehot)
+
+    print(f"Done! Steps: {env.steps}")
+    print(f"Success: {info['reached_end']}")
+
+    path_y = [p[0] for p in env.path_points]
+    path_x = [p[1] for p in env.path_points]
+    
+    gt_y = [p[0] for p in env.ep.gt_poly]
+    gt_x = [p[1] for p in env.ep.gt_poly]
+
+    plt.figure(figsize=(10, 10))
+    plt.imshow(env.ep.img, cmap='gray', origin='upper')
+    plt.plot(gt_x, gt_y, 'r--', linewidth=2, label='Ground Truth')
+    plt.plot(path_x, path_y, 'b.-', markersize=8, linewidth=1, label='Agent Path')
+    plt.plot(path_x[0], path_y[0], 'go', markersize=10, label='Start')
+    plt.plot(path_x[-1], path_y[-1], 'rx', markersize=10, label='End')
+
+    plt.title(f"Rollout Result (Success: {info['reached_end']})")
+    plt.legend()
+    plt.tight_layout()
+    
+    save_path = "rollout_result.png"
+    plt.savefig(save_path)
+    print(f"Trajectory saved to {save_path}")
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--episodes", type=int, default=3000)
     p.add_argument("--branches", action="store_true")
+    p.add_argument("--view", action="store_true", help="Run inference instead of training")
+    p.add_argument("--load", type=str, default="ppo_curve_agent.pth", help="Path to model weights")
     args = p.parse_args()
-    train(args)
+
+    if args.view:
+        view(args)
+    else:
+        train(args)
 
 if __name__ == "__main__":
     main()

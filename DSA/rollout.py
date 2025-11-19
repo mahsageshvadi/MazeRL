@@ -136,15 +136,24 @@ def run_one_rollout(weights, outdir, max_steps=400,
                 out_step = os.path.join(outdir, f"step_{step:04d}.png")
                 plot_trajectory(img, gt_poly, env.path_points, out_step, title=title)
 
-    print(f"[simple_rollout] Done in {step} steps. "
-          f"idx_end={info['idx']}, L_end={info['L_local']:.3f}, CCS={info['ccs']:.3f}")
+    idx_end = info.get("idx", -1)
+    L_end = info.get("L_local", 0.0)
+    ccs_end = info.get("ccs", 0.0)
+
+    print(
+        f"[simple_rollout] Done in {step} steps. "
+        f"idx_end={idx_end}, L_end={L_end:.3f}, CCS={ccs_end:.3f}"
+    )
 
     # 4) Save a final summary image of the whole trajectory
     final_path = os.path.join(outdir, "final_trajectory.png")
-    title = (f"Final | steps={step}, idx={info['idx']}, "
-             f"L_end={info['L_local']:.3f}, CCS={info['ccs']:.3f}")
+    title = (
+        f"Final | steps={step}, idx={idx_end}, "
+        f"L_end={L_end:.3f}, CCS={ccs_end:.3f}"
+    )
     plot_trajectory(img, gt_poly, env.path_points, final_path, title=title)
     print(f"[simple_rollout] Saved final image to {final_path}")
+
 
 
 # ---------- CLI ----------

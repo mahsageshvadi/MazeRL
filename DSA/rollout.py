@@ -20,7 +20,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # Import your training components
-from Synth_simple_v1_2 import (
+from Synth_simple_v1_8_paper_version import (
     CurveEnv, ActorCritic,
     fixed_window_history, ACTIONS_8,
     DEVICE, set_seeds

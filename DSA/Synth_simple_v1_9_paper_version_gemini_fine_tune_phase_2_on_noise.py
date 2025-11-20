@@ -346,7 +346,7 @@ def train_phase2(args):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--episodes", type=int, default=20000)
+    p.add_argument("--episodes", type=int, default=40000)
     # IMPORTANT: Point this to your PHASE 1 result
     p.add_argument("--load_path", default="ppo_curve_agent.pth", type=str, help="Path to Phase 1 Model (e.g. ppo_phase1_width_ep5000.pth)")
 

@@ -122,6 +122,6 @@ def view_rollout(model_path, num_episodes=5):
 if __name__ == "__main__":
     # CHANGE THIS FILENAME to match your latest saved checkpoint!
     # Example: "ppo_dsa_adapt_ep5000.pth"
-    MODEL_FILENAME = "ppo_dsa_adapt_ep2000.pth" 
+    MODEL_FILENAME = "ppo_phase2_final_ep40000.pth" 
     
     view_rollout(MODEL_FILENAME, num_episodes=10)

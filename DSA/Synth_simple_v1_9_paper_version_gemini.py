@@ -72,7 +72,11 @@ class CurveEnv:
         self.reset()
 
     def reset(self):
-        img, mask, pts_all = self.cm.sample_curve(branches=self.branches)
+        img, mask, pts_all = self.cm.sample_curve(
+            width_range=(1.0, 6.0), 
+            noise_prob=0.0,   
+            invert_prob=0.5   
+        )
         gt_poly = pts_all[0].astype(np.float32)
         
         # Create Ternary GT Map for Critic

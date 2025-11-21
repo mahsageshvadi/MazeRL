@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# Synth_simple_v1.3.py - Paper-aligned reward + DTW distance + critic features
-# Based on: "Deep reinforcement learning for cerebral anterior vessel tree extraction"
 
 import argparse, math, random
 from dataclasses import dataclass
@@ -12,19 +9,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-# ---------- your curve generator ----------
 from Curve_Generator import CurveMaker
 
-# ---------- globals / utils ----------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ACTIONS_8 = [(-1, 0), (1, 0), (0,-1), (0, 1), (-1,-1), (-1,1), (1,-1), (1,1)]
-STEP_ALPHA = 2              # paper uses step scaling
-CROP = 33                   # local window size
-DILATE_RADIUS = 4           # ~ 1.8mm -> ~4 voxels (paper)
-LAMBDA_B     = 2.0    # was 1.0
-LAMBDA_DELTA = 0.7    # was 1.0
-EPS_LOG      = 1e-2   # was 1e-3
-R_LOG_CLAMP  = 3.0    # was 6.0       # weight for log term
+STEP_ALPHA = 2              
+CROP = 33                  
+DILATE_RADIUS = 4           
+LAMBDA_B     = 2.0   
+LAMBDA_DELTA = 0.7    
+EPS_LOG      = 1e-2   
+R_LOG_CLAMP  = 3.0    
 
 def set_seeds(seed=123):
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
@@ -36,8 +31,8 @@ def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
     """Zero-padded square crop centered at (cy,cx). Always returns (size,size)."""
     h, w = img.shape
     r = size // 2
-    y0, y1 = cy - r, cy + r + 1  # [y0,y1)
-    x0, x1 = cx - r, cx + r + 1  # [x0,x1)
+    y0, y1 = cy - r, cy + r + 1  
+    x0, x1 = cx - r, cx + r + 1  
     sy0, sy1 = clamp(y0, 0, h), clamp(y1, 0, h)
     sx0, sx1 = clamp(x0, 0, w), clamp(x1, 0, w)
     out = np.zeros((size, size), dtype=img.dtype)
@@ -95,7 +90,6 @@ def dtw_curve_distance(path_points: List[Tuple[int,int]], gt_poly: np.ndarray) -
     for i in range(1, n):
         for j in range(1, m):
             dp[i, j] = C[i, j] + min(dp[i-1, j], dp[i, j-1], dp[i-1, j-1])
-    # normalize by an approximate alignment length to keep the scale stable
     norm = float(n + m)
     return float(dp[n-1, m-1] / max(norm, 1.0))
 
@@ -104,7 +98,6 @@ def compute_ccs(L_t: float, L0: float) -> float:
     L0 = max(L0, 1e-6)
     return float(1.0 - (L_t / L0))
 
-# ---------- simple binary dilation (disk) ----------
 def disk_offsets(radius: int):
     offs = []
     r2 = radius * radius
@@ -126,7 +119,6 @@ def dilate_mask(mask: np.ndarray, radius: int) -> np.ndarray:
                 out[ny, nx] = 1
     return out
 
-# ---------- environment ----------
 @dataclass
 class CurveEpisode:
     img: np.ndarray
@@ -134,8 +126,8 @@ class CurveEpisode:
     gt_poly: np.ndarray
     start: Tuple[int,int]
     init_dir: Tuple[int,int]
-    ternary_map: np.ndarray   # +1 for target centerline, 0 elsewhere
-    dilated_gt: np.ndarray    # dilated GT for robust overlap
+    ternary_map: np.ndarray 
+    dilated_gt: np.ndarray   
 
 class CurveEnv:
     """Directed curve tracking in 2D."""
@@ -180,20 +172,17 @@ class CurveEnv:
         self.path_points: List[Tuple[int,int]] = [self.agent]
         self.path_mask[self.agent] = 1.0
 
-        # Progress & local distance memory
         self.best_idx = 0
         _, d0_local = nearest_gt_index(self.agent, self.ep.gt_poly)
         self.L_prev_local = d0_local
 
-        # Learning/scheduling baseline L0:
-        # use DTW distance between the GT and a "stuck-at-start" path of same length (non-zero, stable)
         stuck_path = [self.agent] * len(self.ep.gt_poly)
         self.L0 = dtw_curve_distance(stuck_path, self.ep.gt_poly)
         if self.L0 < 1e-6:
             self.L0 = 1.0
 
 
-        self.last_reward = 0.0  # for critic feature vector
+        self.last_reward = 0.0  
         return self.obs()
 
     def obs(self):
@@ -213,17 +202,14 @@ class CurveEnv:
         nx = clamp(self.agent[1] + dx*STEP_ALPHA, 0, self.w-1)
         new_pos = (ny, nx)
 
-        # Move & mark
         self.prev = [self.agent, self.prev[0]]
         self.agent = new_pos
         self.path_points.append(self.agent)
         self.path_mask[self.agent] = 1.0
 
-        # Local distance & progress
         idx, d_gt = nearest_gt_index(self.agent, self.ep.gt_poly)
         delta = d_gt - self.L_prev_local
 
-        # ============ REWARD COMPUTATION (Paper Eq. 3, numerically safe) ============
         on_curve = (self.ep.dilated_gt[self.agent] > 0.5)
         B_t = 1.0 if on_curve else 0.0
 
@@ -231,15 +217,13 @@ class CurveEnv:
         log_term = math.log(EPS_LOG + (delta_abs / self.D0))
         log_term = float(np.clip(log_term, -R_LOG_CLAMP, R_LOG_CLAMP))
 
-        if delta < 0:  # getting closer
+        if delta < 0:  
             r = LAMBDA_B * B_t - LAMBDA_DELTA * log_term
-        else:          # farther/same
+        else:          
             r = LAMBDA_B * B_t + LAMBDA_DELTA * log_term
         
-        # Update local memory for next step
         self.L_prev_local = d_gt
 
-        # Termination rules (paper)
         ref_length = len(self.ep.gt_poly)
         track_length = len(self.path_points)
         exceeded_length = track_length > 1.5 * ref_length
@@ -250,13 +234,12 @@ class CurveEnv:
         done = exceeded_length or off_track or reached_end or timeout
 
         if reached_end:
-            r += 100.0  # success bonus
+            r += 100.0  
 
-        # Global curve distance + CCS
         L_t = dtw_curve_distance(self.path_points, self.ep.gt_poly)
         ccs = compute_ccs(L_t, self.L0)
 
-        self.last_reward = r  # for critic features
+        self.last_reward = r  
 
         return self.obs(), float(r), done, {
             "overlap": 1.0 if on_curve else 0.0,
@@ -294,7 +277,6 @@ class ActorCritic(nn.Module):
         self.actor_head  = nn.Sequential(nn.Linear(64+64,128), nn.PReLU(), nn.Linear(128, n_actions))
         self.critic_head = nn.Sequential(nn.Linear(64+64,128), nn.PReLU(), nn.Linear(128, 1))
 
-        # safe init
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
                 nn.init.kaiming_uniform_(m.weight, a=0.25, nonlinearity='leaky_relu')
@@ -302,18 +284,17 @@ class ActorCritic(nn.Module):
                     nn.init.constant_(m.bias, 0.0)
 
     def forward(self, x, ahist_onehot, fhist_feat, hc_actor=None, hc_critic=None):
-        # NaN/Inf guard
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
         ahist_onehot = torch.nan_to_num(ahist_onehot, nan=0.0, posinf=0.0, neginf=0.0)
         fhist_feat = torch.nan_to_num(fhist_feat, nan=0.0, posinf=0.0, neginf=0.0)
 
-        z = self.cnn(x)                         # (B,64,33,33)
-        z = self.gap(z).squeeze(-1).squeeze(-1) # (B,64)
+        z = self.cnn(x)                         
+        z = self.gap(z).squeeze(-1).squeeze(-1) 
 
-        out_a, hc_actor  = self.lstm_actor(ahist_onehot, hc_actor)   # (B,K,64)
-        out_c, hc_critic = self.lstm_critic(fhist_feat,  hc_critic)  # (B,K,64)
-        h_a = out_a[:, -1, :]                                        # (B,64)
-        h_c = out_c[:, -1, :]                                        # (B,64)
+        out_a, hc_actor  = self.lstm_actor(ahist_onehot, hc_actor)  
+        out_c, hc_critic = self.lstm_critic(fhist_feat,  hc_critic)  
+        h_a = out_a[:, -1, :]                                        
+        h_c = out_c[:, -1, :]                                       
 
         h_cat = torch.cat([z, h_a], dim=1)
         logits = self.actor_head(h_cat)
@@ -339,14 +320,12 @@ class PPO:
         self.value_coef = value_coef
         self.max_grad_norm = max_grad_norm
 
-        # LR schedule
         self.lr = lr
         self.lr_lower_bound = 1e-6
         self.patience = 5
         self.patience_counter = 0
         self.best_val_score = -float('inf')
 
-    # --- inside PPO.update_learning_rate ---
     def update_learning_rate(self, val_score):
         if val_score > self.best_val_score:
             self.best_val_score = val_score

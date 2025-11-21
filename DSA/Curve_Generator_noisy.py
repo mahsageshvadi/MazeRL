@@ -46,14 +46,11 @@ class CurveMakerDSA:
         return pts
 
     def _draw_path(self, pts, img, mask_layer):
-        # Draw on a temp layer first
         temp_layer = np.zeros_like(img)
         for (y, x) in pts:
             _stamp_disc(temp_layer, y, x, self.thickness, 1.0)
             _stamp_disc(mask_layer, y, x, self.thickness, 1.0)
         
-        # --- HANDLE VESSEL INTENSITY HERE ---
-        # Randomly dim the vessel to simulate non-perfect contrast
         intensity = self.rng.uniform(0.4, 0.95)
         img[:] = np.maximum(img, temp_layer * intensity)
 
@@ -65,19 +62,40 @@ class CurveMakerDSA:
         self._draw_path(pts_main, img, mask)
         pts_all = [pts_main]
 
-        # If you wanted global intensity scaling, you could do it here,
-        # but _draw_path already handled the vessel brightness.
-        # The line causing the error (img = img * intensity) is removed.
-
         # --- DSA AUGMENTATION ---
         
-        # 1. Background Artifacts (Blobs)
-        num_blobs = self.rng.integers(2, 6)
-        for _ in range(num_blobs):
-            by, bx = self._random_point(margin=0)
-            b_rad = self.rng.uniform(10, 30)
-            b_int = self.rng.uniform(0.1, 0.4)
-            _stamp_disc(img, by, bx, b_rad, b_int)
+        # 1. Background Artifacts (Soft Cloud-like Blobs)
+        num_clouds = self.rng.integers(3, 8)
+        for _ in range(num_clouds):
+            # Get float coordinates and convert to INT immediately
+            cy_float, cx_float = self._random_point()
+            cy, cx = int(cy_float), int(cx_float)
+            
+            # Create a small patch of random noise
+            size = int(self.rng.uniform(20, 50))
+            noise_patch = self.rng.uniform(0, 1, (size, size))
+            
+            # Blur it to look like soft tissue
+            noise_patch = scipy.ndimage.gaussian_filter(noise_patch, sigma=5.0)
+            
+            # Normalize intensity
+            noise_patch = noise_patch / (np.max(noise_patch) + 1e-6) * self.rng.uniform(0.1, 0.4)
+            
+            # Calculate integer slice indices
+            half_size = size // 2
+            y0 = int(max(0, cy - half_size))
+            y1 = int(min(self.h, cy + half_size))
+            x0 = int(max(0, cx - half_size))
+            x1 = int(min(self.w, cx + half_size))
+            
+            # Calculate patch slice indices
+            ph = y1 - y0
+            pw = x1 - x0
+            
+            # Only add if the patch is valid (positive width/height)
+            if ph > 0 and pw > 0:
+                # Add the patch (sliced to fit if near edge)
+                img[y0:y1, x0:x1] += noise_patch[:ph, :pw]
 
         # 2. Gaussian Noise
         noise_level = self.rng.uniform(0.05, 0.15)

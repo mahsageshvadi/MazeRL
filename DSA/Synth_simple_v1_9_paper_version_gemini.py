@@ -390,7 +390,7 @@ def train(args):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--episodes", type=int, default=30000)
+    p.add_argument("--episodes", type=int, default=50000)
     p.add_argument("--branches", action="store_true")
     args = p.parse_args()
     train(args)

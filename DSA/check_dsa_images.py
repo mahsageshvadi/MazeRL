@@ -49,5 +49,27 @@ def show_samples():
     print("Saved 'dsa_samples_preview.png'. Open it to see the generated images.")
     plt.show()
 
-if __name__ == "__main__":
-    show_samples()
+
+from Synth_simple_v1_9_paper_version_gemini import CurveEnv
+import matplotlib.pyplot as plt
+
+env = CurveEnv(h=128, w=128)
+count_inverted = 0
+
+plt.figure(figsize=(12, 4))
+for i in range(10):
+    obs = env.reset()
+    # Check the center pixel of the crop. 
+    # If background is White (1.0), this should be high.
+    # If background is Black (0.0), this should be low.
+    img = env.ep.img
+    is_inverted = img[0,0] > 0.5 # Check corner pixel
+    if is_inverted: count_inverted += 1
+    
+    plt.subplot(2, 5, i+1)
+    plt.imshow(img, cmap='gray', vmin=0, vmax=1)
+    plt.axis('off')
+    plt.title(f"Inv: {is_inverted}")
+
+plt.show()
+print(f"Total Inverted in 10 resets: {count_inverted}")

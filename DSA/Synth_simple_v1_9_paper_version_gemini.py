@@ -35,13 +35,25 @@ def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
     r = size // 2
     y0, y1 = cy - r, cy + r + 1
     x0, x1 = cx - r, cx + r + 1
+    
+    # Determine padding value based on local context
+    # If we are on a white background, pad with 1.0. If black, 0.0.
+    # We sample the center pixel to guess the background "vibe"
+    center_val = img[min(max(0, cy), h-1), min(max(0, cx), w-1)]
+    pad_val = 1.0 if center_val > 0.5 else 0.0
+    
+    # Initialize output with the PAD value
+    out = np.full((size, size), pad_val, dtype=img.dtype)
+    
     sy0, sy1 = clamp(y0, 0, h), clamp(y1, 0, h)
     sx0, sx1 = clamp(x0, 0, w), clamp(x1, 0, w)
-    out = np.zeros((size, size), dtype=img.dtype)
+    
     oy0 = sy0 - y0; ox0 = sx0 - x0
     sh  = sy1 - sy0; sw  = sx1 - sx0
+    
     if sh > 0 and sw > 0:
         out[oy0:oy0+sh, ox0:ox0+sw] = img[sy0:sy1, sx0:sx1]
+        
     return out
 
 def fixed_window_history(ahist_list, K, n_actions):
@@ -73,7 +85,7 @@ class CurveEnv:
 
     def reset(self):
         img, mask, pts_all = self.cm.sample_curve(
-            width_range=(1.0, 6.0), 
+            width_range=(1.0, 2.0), 
             noise_prob=0.0,   
             invert_prob=0.5   
         )

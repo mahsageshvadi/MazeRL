@@ -24,7 +24,7 @@ def _stamp_disc(arr, cy, cx, rad, value=1.0):
     # Use maximum to combine strokes
     arr[y0:y1, x0:x1][mask] = np.maximum(arr[y0:y1, x0:x1][mask], value)
 
-class CurveMakerFlexible:
+class CurveMaker:
     def __init__(self, h=128, w=128, seed=None):
         self.h, self.w = h, w
         self.rng = _rng(seed)

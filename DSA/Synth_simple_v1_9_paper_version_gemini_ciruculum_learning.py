@@ -26,21 +26,25 @@ def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
     y0, y1 = cy - r, cy + r + 1
     x0, x1 = cx - r, cx + r + 1
     
-    # Detect background color by sampling center pixel
-    # If inverted (White BG), pad with 1.0. Else 0.0.
-    center_val = img[min(max(0, cy), h-1), min(max(0, cx), w-1)]
-    pad_val = 1.0 if center_val > 0.5 else 0.0
+    # --- FIXED SMART PADDING ---
+    # Don't look at the center (cy, cx) because that might be the vessel!
+    # Look at the top-left corner (0,0) to guess the background color.
+    # If the image is inverted (White Background), [0,0] will be 1.0.
+    bg_sample = img[0, 0]
+    pad_val = 1.0 if bg_sample > 0.5 else 0.0
     
     out = np.full((size, size), pad_val, dtype=img.dtype)
     
     sy0, sy1 = clamp(y0, 0, h), clamp(y1, 0, h)
     sx0, sx1 = clamp(x0, 0, w), clamp(x1, 0, w)
+    
     oy0 = sy0 - y0; ox0 = sx0 - x0
     sh  = sy1 - sy0; sw  = sx1 - sx0
     
     if sh > 0 and sw > 0:
         out[oy0:oy0+sh, ox0:ox0+sw] = img[sy0:sy1, sx0:sx1]
     return out
+    
 
 def fixed_window_history(ahist_list, K, n_actions):
     out = np.zeros((K, n_actions), dtype=np.float32)
@@ -70,7 +74,6 @@ class CurveEnv:
         self.h, self.w = h, w
         self.max_steps = max_steps
         self.cm = CurveMakerFlexible(h=h, w=w, seed=None)
-        # Default Config (Will be overwritten by reset)
         self.config = {} 
         self.reset()
 
@@ -93,7 +96,6 @@ class CurveEnv:
         
         gt_poly = pts_all[0].astype(np.float32)
         
-        # GT Map for Critic
         self.gt_map = np.zeros_like(img)
         for pt in gt_poly:
             r, c = int(pt[0]), int(pt[1])
@@ -154,6 +156,7 @@ class CurveEnv:
         r = float(np.clip(r, -2.0, 2.0))
 
         # Relaxed centerline threshold for thick vessels (Phase 2/3)
+        # If width > 5, we allow being 4.0px away from center
         threshold = 4.0 if self.config.get('width', (2,3))[1] > 5 else 2.5
         on_curve = (L_t < threshold)
         
@@ -162,7 +165,6 @@ class CurveEnv:
         elif on_curve and progress_delta <= 0:
             r -= 0.1
         
-        # Smoothness penalty
         if self.prev_action != -1 and self.prev_action != a_idx:
             r -= 0.05 
         self.prev_action = a_idx
@@ -269,15 +271,15 @@ def train_curriculum():
     phases = [
         # Phase 1: Foundation (Geometry + Inversion). 
         # High contrast (0.6+), Thin vessels (2-3px), No noise.
-        {'name': 'Phase1', 'episodes': 5000, 'lr': 1e-4, 'config': {'width': (2,3), 'noise': 0.0, 'invert': 0.5, 'intensity': 0.6}},
-        
+
+        {'name': 'Phase1', 'episodes': 15000, 'lr': 1e-4, 'config': {'width': (1,3), 'noise': 0.0, 'invert': 0.5, 'intensity': 0.6}},        
         # Phase 2: Scale Invariance (Thick Vessels).
         # High contrast, Thick vessels (2-10px), No noise.
-        {'name': 'Phase2', 'episodes': 5000, 'lr': 1e-4, 'config': {'width': (2,10), 'noise': 0.0, 'invert': 0.5, 'intensity': 0.6}},
+        {'name': 'Phase2', 'episodes': 5000, 'lr': 1e-4, 'config': {'width': (1,10), 'noise': 0.0, 'invert': 0.5, 'intensity': 0.6}},
         
         # Phase 3: Robustness (Low Contrast + Noise).
         # LOW contrast (0.15+), Thick vessels, Full noise.
-        {'name': 'Phase3', 'episodes': 15000, 'lr': 1e-5, 'config': {'width': (2,12), 'noise': 1.0, 'invert': 0.5, 'intensity': 0.15}}
+        {'name': 'Phase3', 'episodes': 15000, 'lr': 1e-5, 'config': {'width': (1,12), 'noise': 1.0, 'invert': 0.5, 'intensity': 0.15}}
     ]
 
     env = CurveEnv(h=128, w=128)
@@ -285,9 +287,6 @@ def train_curriculum():
     nA = len(ACTIONS_8)
     model = AsymmetricActorCritic(n_actions=nA, K=K).to(DEVICE)
     
-    # Variable to keep track of model state between phases
-    current_weights = None
-
     for p_idx, phase in enumerate(phases):
         print(f"\n=== STARTING {phase['name']} ===")
         print(f"Config: {phase['config']}")
@@ -300,7 +299,7 @@ def train_curriculum():
         opt = torch.optim.Adam(model.parameters(), lr=phase['lr'])
         
         batch_buffer = []
-        BATCH_SIZE_EPISODES = 16
+        BATCH_SIZE_EPISODES = 32
         ep_returns = []
         
         for ep in range(1, phase['episodes'] + 1):
@@ -367,9 +366,10 @@ def train_curriculum():
                 success_rate = sum(1 for r in ep_returns[-100:] if r > 40) / 100
                 print(f"[{phase['name']}] Ep {ep} | Avg Rew: {avg_r:.2f} | Success: {success_rate:.2f}")
 
-            # Save checkpoint periodically
-            if ep % 2000 == 0:
-                torch.save(model.state_dict(), f"ckpt_{phase['name']}_{ep}.pth")
+            # Save checkpoint frequently (e.g., every 500 episodes)
+            if ep % 500 == 0:
+                torch.save(model.state_dict(), f"ckpt_{phase['name']}_ep{ep}.pth")
+                print(f"Saved checkpoint: ckpt_{phase['name']}_ep{ep}.pth")
 
         # End of Phase Save
         final_name = f"ppo_model_{phase['name']}_final.pth"

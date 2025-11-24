@@ -21,14 +21,34 @@ class CurveMakerFlexible:
         return np.array([y, x], dtype=np.float32)
 
     def _generate_bezier_points(self, p0=None, n_samples=1000):
-        if p0 is None: p0 = self._random_point()
-        p3 = self._random_point()
+        """Generates a list of (y,x) points forming a smooth bezier curve."""
+        if p0 is None:
+            # Don't start too close to the edge (margin=10)
+            p0 = self._random_point(margin=10)
+        
+        # FIX: Ensure p3 is far enough from p0
+        for _ in range(20): # Try 20 times to find a good point
+            p3 = self._random_point(margin=10)
+            dist = np.linalg.norm(p0 - p3)
+            
+            # If the curve is at least 40 pixels long, keep it.
+            # This prevents "blobs" when thickness is high.
+            if dist > 40.0: 
+                break
+        else:
+            # Fallback if loop fails (rare): force p3 to opposite corner
+            p3 = np.array([self.h - p0[0], self.w - p0[1]], dtype=np.float32)
+
+        # Control points (midway + jitter) to create organic curvature
         center = (p0 + p3) / 2.0
         spread = np.array([self.h, self.w], dtype=np.float32) * 0.3
         p1 = center + self.rng.normal(0, 1, 2) * spread * 0.6
         p2 = center + self.rng.normal(0, 1, 2) * spread * 0.6
+        
+        # High sample count = smoother lines for OpenCV to draw
         ts = np.linspace(0, 1, n_samples, dtype=np.float32)
         pts = np.stack([_cubic_bezier(p0, p1, p2, p3, t) for t in ts], axis=0)
+        
         return pts
 
     def _draw_aa_curve(self, img, pts, thickness, intensity):
@@ -45,7 +65,7 @@ class CurveMakerFlexible:
                      width_range=(2, 2),    
                      noise_prob=0.0,        
                      invert_prob=0.0,
-                     min_intensity=0.6, # <--- NEW PARAMETER
+                     min_intensity=0.6,
                      branches=False):       
         
         img = np.zeros((self.h, self.w), dtype=np.float32)

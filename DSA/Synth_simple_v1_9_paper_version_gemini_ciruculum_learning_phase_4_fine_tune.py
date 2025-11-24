@@ -7,43 +7,46 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 from dataclasses import dataclass
 
+# --- IMPORT GENERATOR ---
+try:
+    from Curve_Generator_Flexible_For_Ciruculum_learning import CurveMakerFlexible
+except ImportError:
+    print("ERROR: Could not import generator. Make sure 'Curve_Generator_Flexible_For_Ciruculum_learning.py' is in the folder.")
+    exit()
 
-from Curve_Generator_Flexible_For_Ciruculum_learning import CurveMakerFlexible
-
-
+# ---------- GLOBALS ----------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ACTIONS_8 = [(-1, 0), (1, 0), (0,-1), (0, 1), (-1,-1), (-1,1), (1,-1), (1,1)]
 STEP_ALPHA = 2.0
 CROP = 33
 EPSILON = 1e-6
 
-# --- FIX: SMART PADDING FOR INVERTED IMAGES ---
+# --- FIX 1: ROBUST SMART PADDING ---
 def clamp(v, lo, hi): return max(lo, min(v, hi))
 
 def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
     h, w = img.shape
     
-    # --- ROBUST SMART PADDING ---
-    # Don't trust just one pixel. Check the median of the 4 corners.
+    # Check 4 corners to determine background color
     corners = [img[0,0], img[0, w-1], img[h-1, 0], img[h-1, w-1]]
     bg_estimate = np.median(corners)
     
     pad_val = 1.0 if bg_estimate > 0.5 else 0.0
     
-    # ... (Rest of the crop logic is the same) ...
     r = size // 2
     y0, y1 = cy - r, cy + r + 1
     x0, x1 = cx - r, cx + r + 1
+    
     out = np.full((size, size), pad_val, dtype=img.dtype)
-    # ... (copy paste the rest) ...
+    
     sy0, sy1 = clamp(y0, 0, h), clamp(y1, 0, h)
     sx0, sx1 = clamp(x0, 0, w), clamp(x1, 0, w)
     oy0 = sy0 - y0; ox0 = sx0 - x0
     sh  = sy1 - sy0; sw  = sx1 - sx0
+    
     if sh > 0 and sw > 0:
         out[oy0:oy0+sh, ox0:ox0+sw] = img[sy0:sy1, sx0:sx1]
     return out
-    
 
 def fixed_window_history(ahist_list, K, n_actions):
     out = np.zeros((K, n_actions), dtype=np.float32)
@@ -68,6 +71,7 @@ class CurveEpisode:
     mask: np.ndarray
     gt_poly: np.ndarray
 
+# ---------- UPDATED ENV WITH GAUSSIAN REWARD & RUNNING START ----------
 class CurveEnv:
     def __init__(self, h=128, w=128, max_steps=200):
         self.h, self.w = h, w
@@ -80,11 +84,11 @@ class CurveEnv:
         self.config = config
 
     def reset(self):
-        # Use current phase configuration
-        width = self.config.get('width', (2, 3))
-        noise = self.config.get('noise', 0.0)
+        # Config defaults to Phase 4 (Hard) if not set
+        width = self.config.get('width', (1, 12))
+        noise = self.config.get('noise', 1.0)
         invert = self.config.get('invert', 0.5)
-        min_int = self.config.get('intensity', 0.6)
+        min_int = self.config.get('intensity', 0.15)
 
         img, mask, pts_all = self.cm.sample_curve(
             width_range=width, 
@@ -95,7 +99,6 @@ class CurveEnv:
         
         gt_poly = pts_all[0].astype(np.float32)
         
-        # GT Map for Critic
         self.gt_map = np.zeros_like(img)
         for pt in gt_poly:
             r, c = int(pt[0]), int(pt[1])
@@ -104,14 +107,10 @@ class CurveEnv:
 
         self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly)
 
-        # --- FIX 2: THE "RUNNING START" ---
-        # Instead of starting at index 0 (stopped), start at index 5
-        # and give the agent history of [idx-2, idx-1, idx].
-        # This gives the LSTM "Momentum" so it knows which way is forward.
-        
+        # --- FIX 2: RUNNING START ---
+        # Start at index 5 to give history
         start_idx = 5
-        # Ensure curve is long enough (generator handles this, but safety first)
-        if len(gt_poly) < 10: start_idx = 0 
+        if len(gt_poly) < 10: start_idx = 0
         
         curr_pt = gt_poly[start_idx]
         prev_pt = gt_poly[max(0, start_idx-1)]
@@ -119,7 +118,7 @@ class CurveEnv:
 
         self.agent = (float(curr_pt[0]), float(curr_pt[1]))
         
-        # Pre-fill history with points ALONG the line
+        # Initialize history along the line (Momentum)
         self.history_pos = [
             (float(prev_pt2[0]), float(prev_pt2[1])),
             (float(prev_pt[0]), float(prev_pt[1])),
@@ -127,7 +126,7 @@ class CurveEnv:
         ]
         
         self.steps = 0
-        self.prev_idx = start_idx # We start further down the line
+        self.prev_idx = start_idx
         self.prev_action = -1 
         self.path_mask = np.zeros_like(mask, dtype=np.float32)
         self.path_points = [self.agent]
@@ -141,12 +140,10 @@ class CurveEnv:
         curr = self.history_pos[-1]
         p1 = self.history_pos[-2]
         p2 = self.history_pos[-3]
-        
         ch0 = crop32(self.ep.img, int(curr[0]), int(curr[1]))
         ch1 = crop32(self.ep.img, int(p1[0]), int(p1[1]))
         ch2 = crop32(self.ep.img, int(p2[0]), int(p2[1]))
         ch3 = crop32(self.path_mask, int(curr[0]), int(curr[1]))
-        
         actor_obs = np.stack([ch0, ch1, ch2, ch3], axis=0).astype(np.float32)
         gt_crop = crop32(self.gt_map, int(curr[0]), int(curr[1]))
         gt_obs = gt_crop[None, ...]
@@ -164,53 +161,42 @@ class CurveEnv:
         ir, ic = int(ny), int(nx)
         self.path_mask[ir, ic] = 1.0
 
-        # Distance Logic
         L_t = get_distance_to_poly(self.agent, self.ep.gt_poly)
         dist_diff = abs(L_t - self.L_prev)
         best_idx = nearest_gt_index(self.agent, self.ep.gt_poly)
         progress_delta = best_idx - self.prev_idx
         
-        # 1. Log Distance (Directional Gradient)
+        # 1. Log Distance
         if L_t < self.L_prev:
             r = np.log(EPSILON + dist_diff)
         else:
             r = -np.log(EPSILON + dist_diff)
         r = float(np.clip(r, -2.0, 2.0))
 
-        # --- FIX 3: GAUSSIAN PRECISION REWARD ---
-        # Instead of "if dist < 4.0: +1", we use a Gaussian bell curve.
-        # This penalizes being "off-center" even if still "inside" the vessel.
-        # Sigma = 2.0 means: 
-        #   Dist 0px -> +1.5 reward
-        #   Dist 2px -> +0.9 reward
-        #   Dist 4px -> +0.2 reward
+        # --- FIX 3: GAUSSIAN REWARD ---
+        # Bell curve: Max reward at 0 distance, decays quickly
         sigma = 2.0
         precision_score = np.exp(-(L_t**2) / (2 * sigma**2))
         
         if progress_delta > 0:
-            # We moved forward along the curve? Great!
-            # Scale reward by how CENTERED we are.
+            # Reward based on how centered we are
             r += precision_score * 1.5 
         elif progress_delta <= 0:
-            # We didn't move forward (loitering or moving backward)
             r -= 0.1
         
-        # Smoothness penalty (Twitching)
+        # Smoothness
         if self.prev_action != -1 and self.prev_action != a_idx:
             r -= 0.05 
         self.prev_action = a_idx
         
-        # Step cost (Hurry up)
         r -= 0.05 
 
         self.L_prev = L_t
         self.prev_idx = max(self.prev_idx, best_idx)
         
-        # Termination Logic
+        # Termination
         dist_to_end = np.sqrt((self.agent[0]-self.ep.gt_poly[-1][0])**2 + (self.agent[1]-self.ep.gt_poly[-1][1])**2)
         reached_end = dist_to_end < 5.0
-        
-        # Loose off-track limit (allow some wiggle room for thick vessels)
         off_track = L_t > 12.0 
         too_long = len(self.path_points) > len(self.ep.gt_poly) * 2.5
         
@@ -222,6 +208,7 @@ class CurveEnv:
         info = {"reached_end": reached_end}
         return self.obs(), r, done, info
 
+# ---------- MODEL ----------
 def gn(c): return nn.GroupNorm(4, c)
 
 class AsymmetricActorCritic(nn.Module):
@@ -299,118 +286,116 @@ def update_ppo(ppo_opt, model, buf_list, clip=0.2, epochs=4, minibatch=32):
             nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             ppo_opt.step()
 
-# ---------- CURRICULUM MANAGER ----------
-def train_curriculum():
-    print("--- STARTING CURRICULUM TRAINING ---")
+# ---------- PHASE 4 TRAINING LOOP ----------
+def train_phase4(args):
+    print("--- STARTING PHASE 4: FINE-TUNING (PRECISION) ---")
     
-    # Definition of Phases
-    phases = [
-        # Phase 1: Foundation (Geometry + Inversion). 
-        # High contrast (0.6+), Thin vessels (2-3px), No noise.
-
-        {'name': 'Phase1', 'episodes': 15000, 'lr': 1e-4, 'config': {'width': (1,3), 'noise': 0.0, 'invert': 0.5, 'intensity': 0.6}},        
-        # Phase 2: Scale Invariance (Thick Vessels).
-        # High contrast, Thick vessels (2-10px), No noise.
-        {'name': 'Phase2', 'episodes': 5000, 'lr': 1e-4, 'config': {'width': (1,10), 'noise': 0.0, 'invert': 0.5, 'intensity': 0.6}},
-        
-        # Phase 3: Robustness (Low Contrast + Noise).
-        # LOW contrast (0.15+), Thick vessels, Full noise.
-        {'name': 'Phase3', 'episodes': 15000, 'lr': 1e-5, 'config': {'width': (1,12), 'noise': 1.0, 'invert': 0.5, 'intensity': 0.15}}
-    ]
-
+    # 1. Setup
     env = CurveEnv(h=128, w=128)
+    
+    # Explicit Phase 4 / Phase 3 Config
+    config = {'width': (1, 12), 'noise': 1.0, 'invert': 0.5, 'intensity': 0.15}
+    env.set_config(config)
+    print(f"Config: {config}")
+    
     K = 8
     nA = len(ACTIONS_8)
     model = AsymmetricActorCritic(n_actions=nA, K=K).to(DEVICE)
     
-    for p_idx, phase in enumerate(phases):
-        print(f"\n=== STARTING {phase['name']} ===")
-        print(f"Config: {phase['config']}")
-        print(f"LR: {phase['lr']} | Steps: {phase['episodes']}")
+    # 2. Load Previous Model
+    try:
+        print(f"Loading weights from: {args.load_path}")
+        model.load_state_dict(torch.load(args.load_path, map_location=DEVICE))
+        print("Weights loaded successfully.")
+    except FileNotFoundError:
+        print(f"ERROR: Model {args.load_path} not found.")
+        return
+
+    # 3. Low Learning Rate for Fine-Tuning
+    # Using 1e-5 as requested for stability
+    opt = torch.optim.Adam(model.parameters(), lr=1e-5)
+    
+    batch_buffer = []
+    BATCH_SIZE_EPISODES = 32
+    ep_returns = []
+    
+    for ep in range(1, args.episodes + 1):
+        obs_dict = env.reset()
+        done = False
+        ahist = []
+        ep_traj = {"obs":{'actor':[], 'critic_gt':[]}, "ahist":[], "act":[], "logp":[], "val":[], "rew":[]}
         
-        # Update Env Config
-        env.set_config(phase['config'])
-        
-        # Optimizer (Reset optimizer for each phase to adjust LR cleanly)
-        opt = torch.optim.Adam(model.parameters(), lr=phase['lr'])
-        
-        batch_buffer = []
-        BATCH_SIZE_EPISODES = 32
-        ep_returns = []
-        
-        for ep in range(1, phase['episodes'] + 1):
-            obs_dict = env.reset()
-            done = False
-            ahist = []
-            ep_traj = {"obs":{'actor':[], 'critic_gt':[]}, "ahist":[], "act":[], "logp":[], "val":[], "rew":[]}
+        while not done:
+            obs_a = torch.tensor(obs_dict['actor'][None], dtype=torch.float32, device=DEVICE)
+            obs_c = torch.tensor(obs_dict['critic_gt'][None], dtype=torch.float32, device=DEVICE)
+            A = fixed_window_history(ahist, K, nA)[None, ...]
+            A_t = torch.tensor(A, dtype=torch.float32, device=DEVICE)
+
+            with torch.no_grad():
+                logits, value, _, _ = model(obs_a, obs_c, A_t)
+                logits = torch.clamp(logits, -20, 20)
+                dist = Categorical(logits=logits)
+                action = dist.sample().item()
+                logp = dist.log_prob(torch.tensor(action, device=DEVICE)).item()
+                val = value.item()
+
+            next_obs, r, done, info = env.step(action)
+
+            ep_traj["obs"]['actor'].append(obs_dict['actor'])
+            ep_traj["obs"]['critic_gt'].append(obs_dict['critic_gt'])
+            ep_traj["ahist"].append(A[0])
+            ep_traj["act"].append(action)
+            ep_traj["logp"].append(logp)
+            ep_traj["val"].append(val)
+            ep_traj["rew"].append(r)
+            a_onehot = np.zeros(nA); a_onehot[action] = 1.0
+            ahist.append(a_onehot)
+            obs_dict = next_obs
+
+        if len(ep_traj["rew"]) > 2:
+            rews = np.array(ep_traj["rew"])
+            vals = np.array(ep_traj["val"] + [0.0])
+            delta = rews + 0.9 * vals[1:] - vals[:-1]
+            adv = np.zeros_like(rews)
+            acc = 0
+            for t in reversed(range(len(rews))):
+                acc = delta[t] + 0.9 * 0.95 * acc
+                adv[t] = acc
+            ret = adv + vals[:-1]
             
-            while not done:
-                obs_a = torch.tensor(obs_dict['actor'][None], dtype=torch.float32, device=DEVICE)
-                obs_c = torch.tensor(obs_dict['critic_gt'][None], dtype=torch.float32, device=DEVICE)
-                A = fixed_window_history(ahist, K, nA)[None, ...]
-                A_t = torch.tensor(A, dtype=torch.float32, device=DEVICE)
+            final_ep_data = {
+                "obs": {"actor": np.array(ep_traj["obs"]['actor']), "critic_gt": np.array(ep_traj["obs"]['critic_gt'])},
+                "ahist": np.array(ep_traj["ahist"]),
+                "act": np.array(ep_traj["act"]),
+                "logp": np.array(ep_traj["logp"]),
+                "adv": adv, "ret": ret
+            }
+            batch_buffer.append(final_ep_data)
+            ep_returns.append(sum(rews))
 
-                with torch.no_grad():
-                    logits, value, _, _ = model(obs_a, obs_c, A_t)
-                    logits = torch.clamp(logits, -20, 20)
-                    dist = Categorical(logits=logits)
-                    action = dist.sample().item()
-                    logp = dist.log_prob(torch.tensor(action, device=DEVICE)).item()
-                    val = value.item()
+        if len(batch_buffer) >= BATCH_SIZE_EPISODES:
+            update_ppo(opt, model, batch_buffer)
+            batch_buffer = []
 
-                next_obs, r, done, info = env.step(action)
+        if ep % 100 == 0:
+            avg_r = np.mean(ep_returns[-100:])
+            # Threshold is slightly different because reward scale changed with Gaussian
+            success_cnt = sum(1 for r in ep_returns[-100:] if r > 40)
+            print(f"[Phase 4] Ep {ep} | Avg Rew: {avg_r:.2f} | Success: {success_cnt/100:.2f}")
 
-                ep_traj["obs"]['actor'].append(obs_dict['actor'])
-                ep_traj["obs"]['critic_gt'].append(obs_dict['critic_gt'])
-                ep_traj["ahist"].append(A[0])
-                ep_traj["act"].append(action)
-                ep_traj["logp"].append(logp)
-                ep_traj["val"].append(val)
-                ep_traj["rew"].append(r)
-                a_onehot = np.zeros(nA); a_onehot[action] = 1.0
-                ahist.append(a_onehot)
-                obs_dict = next_obs
+        if ep % 500 == 0:
+            save_name = f"ckpt_Phase4_ep{ep}.pth"
+            torch.save(model.state_dict(), save_name)
+            print(f"Saved checkpoint: {save_name}")
 
-            # GAE & Buffer
-            if len(ep_traj["rew"]) > 2:
-                rews = np.array(ep_traj["rew"])
-                vals = np.array(ep_traj["val"] + [0.0])
-                delta = rews + 0.9 * vals[1:] - vals[:-1]
-                adv = np.zeros_like(rews)
-                acc = 0
-                for t in reversed(range(len(rews))):
-                    acc = delta[t] + 0.9 * 0.95 * acc
-                    adv[t] = acc
-                ret = adv + vals[:-1]
-                
-                final_ep_data = {
-                    "obs": {"actor": np.array(ep_traj["obs"]['actor']), "critic_gt": np.array(ep_traj["obs"]['critic_gt'])},
-                    "ahist": np.array(ep_traj["ahist"]),
-                    "act": np.array(ep_traj["act"]),
-                    "logp": np.array(ep_traj["logp"]),
-                    "adv": adv, "ret": ret
-                }
-                batch_buffer.append(final_ep_data)
-                ep_returns.append(sum(rews))
-
-            if len(batch_buffer) >= BATCH_SIZE_EPISODES:
-                update_ppo(opt, model, batch_buffer)
-                batch_buffer = []
-
-            if ep % 100 == 0:
-                avg_r = np.mean(ep_returns[-100:])
-                success_rate = sum(1 for r in ep_returns[-100:] if r > 40) / 100
-                print(f"[{phase['name']}] Ep {ep} | Avg Rew: {avg_r:.2f} | Success: {success_rate:.2f}")
-
-            # Save checkpoint frequently (e.g., every 500 episodes)
-            if ep % 500 == 0:
-                torch.save(model.state_dict(), f"ckpt_{phase['name']}_ep{ep}.pth")
-                print(f"Saved checkpoint: ckpt_{phase['name']}_ep{ep}.pth")
-
-        # End of Phase Save
-        final_name = f"ppo_model_{phase['name']}_final.pth"
-        torch.save(model.state_dict(), final_name)
-        print(f"--- Completed {phase['name']}. Saved to {final_name} ---")
+    final_name = "ppo_model_Phase4_final.pth"
+    torch.save(model.state_dict(), final_name)
+    print(f"--- Phase 4 Complete. Saved to {final_name} ---")
 
 if __name__ == "__main__":
-    train_curriculum()
+    p = argparse.ArgumentParser()
+    p.add_argument("--episodes", type=int, default=5000)
+    # Default loads your previous Phase 3 checkpoint
+    p.add_argument("--load_path", type=str, default="ckpt_Phase3_ep9000.pth")
+    args = p.parse_args()
+    train_phase4(args)

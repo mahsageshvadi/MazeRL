@@ -6,11 +6,11 @@ from scipy.interpolate import splprep, splev
 
 # 1. Import the Base Classes from your main script
 # (Ensure this filename matches your actual file)
-from Synth_simple_v1_9_paper_version_gemini import CurveEnv, AsymmetricActorCritic, fixed_window_history, ACTIONS_8, DEVICE
+from Synth_simple_v1_9_paper_version_gemini_ciruculum_learning import CurveEnv, AsymmetricActorCritic, fixed_window_history, ACTIONS_8, DEVICE
 
 # 2. Import the Noisy Generator
 try:
-    from Curve_Generator_noisy import CurveMakerDSA
+    from Curve_Generator_Flexible_For_Ciruculum_learning import CurveMakerFlexible
 except ImportError:
     print("ERROR: Could not find 'Curve_Generator_DSA.py'")
     exit()
@@ -21,7 +21,7 @@ class CurveEnvDSA(CurveEnv):
     def __init__(self, h=128, w=128, branches=False):
         super().__init__(h, w, branches)
         # SWAP THE GENERATOR HERE
-        self.cm = CurveMakerDSA(h=h, w=w, thickness=1.5, seed=None)
+        self.cm = CurveMakerFlexible(h=h, w=w, seed=None)
 
 # --- Smoothing Function ---
 def smooth_path(path_points):
@@ -122,6 +122,6 @@ def view_rollout(model_path, num_episodes=5):
 if __name__ == "__main__":
     # CHANGE THIS FILENAME to match your latest saved checkpoint!
     # Example: "ppo_dsa_adapt_ep5000.pth"
-    MODEL_FILENAME = "ppo_phase2_final_ep40000.pth" 
+    MODEL_FILENAME = "ppo_model_Phase1_final.pth" 
     
     view_rollout(MODEL_FILENAME, num_episodes=10)

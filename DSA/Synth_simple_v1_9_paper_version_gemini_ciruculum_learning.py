@@ -22,28 +22,28 @@ def clamp(v, lo, hi): return max(lo, min(v, hi))
 
 def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
     h, w = img.shape
-    
-    # --- ROBUST SMART PADDING ---
-    # Don't trust just one pixel. Check the median of the 4 corners.
-    corners = [img[0,0], img[0, w-1], img[h-1, 0], img[h-1, w-1]]
-    bg_estimate = np.median(corners)
-    
-    pad_val = 1.0 if bg_estimate > 0.5 else 0.0
-    
-    # ... (Rest of the crop logic is the same) ...
     r = size // 2
     y0, y1 = cy - r, cy + r + 1
     x0, x1 = cx - r, cx + r + 1
+    
+    # --- FIXED SMART PADDING ---
+    # Don't look at the center (cy, cx) because that might be the vessel!
+    # Look at the top-left corner (0,0) to guess the background color.
+    # If the image is inverted (White Background), [0,0] will be 1.0.
+    bg_sample = img[0, 0]
+    pad_val = 1.0 if bg_sample > 0.5 else 0.0
+    
     out = np.full((size, size), pad_val, dtype=img.dtype)
-    # ... (copy paste the rest) ...
+    
     sy0, sy1 = clamp(y0, 0, h), clamp(y1, 0, h)
     sx0, sx1 = clamp(x0, 0, w), clamp(x1, 0, w)
+    
     oy0 = sy0 - y0; ox0 = sx0 - x0
     sh  = sy1 - sy0; sw  = sx1 - sx0
+    
     if sh > 0 and sw > 0:
         out[oy0:oy0+sh, ox0:ox0+sw] = img[sy0:sy1, sx0:sx1]
     return out
-    
 
 def fixed_window_history(ahist_list, K, n_actions):
     out = np.zeros((K, n_actions), dtype=np.float32)
@@ -95,44 +95,22 @@ class CurveEnv:
         
         gt_poly = pts_all[0].astype(np.float32)
         
-        # GT Map for Critic
         self.gt_map = np.zeros_like(img)
         for pt in gt_poly:
             r, c = int(pt[0]), int(pt[1])
             if 0<=r<self.h and 0<=c<self.w:
                 self.gt_map[r,c] = 1.0
 
+        p0 = gt_poly[0].astype(int)
         self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly)
 
-        # --- FIX 2: THE "RUNNING START" ---
-        # Instead of starting at index 0 (stopped), start at index 5
-        # and give the agent history of [idx-2, idx-1, idx].
-        # This gives the LSTM "Momentum" so it knows which way is forward.
-        
-        start_idx = 5
-        # Ensure curve is long enough (generator handles this, but safety first)
-        if len(gt_poly) < 10: start_idx = 0 
-        
-        curr_pt = gt_poly[start_idx]
-        prev_pt = gt_poly[max(0, start_idx-1)]
-        prev_pt2 = gt_poly[max(0, start_idx-2)]
-
-        self.agent = (float(curr_pt[0]), float(curr_pt[1]))
-        
-        # Pre-fill history with points ALONG the line
-        self.history_pos = [
-            (float(prev_pt2[0]), float(prev_pt2[1])),
-            (float(prev_pt[0]), float(prev_pt[1])),
-            self.agent
-        ]
-        
+        self.agent = (float(p0[0]), float(p0[1]))
+        self.history_pos = [self.agent] * 3 
         self.steps = 0
-        self.prev_idx = start_idx # We start further down the line
+        self.prev_idx = 0
         self.prev_action = -1 
         self.path_mask = np.zeros_like(mask, dtype=np.float32)
         self.path_points = [self.agent]
-        self.path_mask[int(self.agent[0]), int(self.agent[1])] = 1.0
-        
         self.L_prev = get_distance_to_poly(self.agent, self.ep.gt_poly)
         
         return self.obs()
@@ -164,54 +142,39 @@ class CurveEnv:
         ir, ic = int(ny), int(nx)
         self.path_mask[ir, ic] = 1.0
 
-        # Distance Logic
         L_t = get_distance_to_poly(self.agent, self.ep.gt_poly)
         dist_diff = abs(L_t - self.L_prev)
         best_idx = nearest_gt_index(self.agent, self.ep.gt_poly)
         progress_delta = best_idx - self.prev_idx
         
-        # 1. Log Distance (Directional Gradient)
+        # Reward
         if L_t < self.L_prev:
             r = np.log(EPSILON + dist_diff)
         else:
             r = -np.log(EPSILON + dist_diff)
         r = float(np.clip(r, -2.0, 2.0))
 
-        # --- FIX 3: GAUSSIAN PRECISION REWARD ---
-        # Instead of "if dist < 4.0: +1", we use a Gaussian bell curve.
-        # This penalizes being "off-center" even if still "inside" the vessel.
-        # Sigma = 2.0 means: 
-        #   Dist 0px -> +1.5 reward
-        #   Dist 2px -> +0.9 reward
-        #   Dist 4px -> +0.2 reward
-        sigma = 2.0
-        precision_score = np.exp(-(L_t**2) / (2 * sigma**2))
+        # Relaxed centerline threshold for thick vessels (Phase 2/3)
+        # If width > 5, we allow being 4.0px away from center
+        threshold = 4.0 if self.config.get('width', (2,3))[1] > 5 else 2.5
+        on_curve = (L_t < threshold)
         
-        if progress_delta > 0:
-            # We moved forward along the curve? Great!
-            # Scale reward by how CENTERED we are.
-            r += precision_score * 1.5 
-        elif progress_delta <= 0:
-            # We didn't move forward (loitering or moving backward)
+        if on_curve and progress_delta > 0:
+            r += 1.0
+        elif on_curve and progress_delta <= 0:
             r -= 0.1
         
-        # Smoothness penalty (Twitching)
         if self.prev_action != -1 and self.prev_action != a_idx:
             r -= 0.05 
         self.prev_action = a_idx
-        
-        # Step cost (Hurry up)
         r -= 0.05 
 
         self.L_prev = L_t
         self.prev_idx = max(self.prev_idx, best_idx)
         
-        # Termination Logic
         dist_to_end = np.sqrt((self.agent[0]-self.ep.gt_poly[-1][0])**2 + (self.agent[1]-self.ep.gt_poly[-1][1])**2)
         reached_end = dist_to_end < 5.0
-        
-        # Loose off-track limit (allow some wiggle room for thick vessels)
-        off_track = L_t > 12.0 
+        off_track = L_t > (threshold * 3.0)
         too_long = len(self.path_points) > len(self.ep.gt_poly) * 2.5
         
         done = reached_end or off_track or too_long or (self.steps >= self.max_steps)

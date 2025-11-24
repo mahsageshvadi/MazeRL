@@ -394,7 +394,7 @@ def train_phase4(args):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--episodes", type=int, default=5000)
+    p.add_argument("--episodes", type=int, default=15000)
     # Default loads your previous Phase 3 checkpoint
     p.add_argument("--load_path", type=str, default="ckpt_Phase3_ep9000.pth")
     args = p.parse_args()

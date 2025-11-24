@@ -142,4 +142,4 @@ def view_rollout(model_path):
 
 if __name__ == "__main__":
     # Point to your LATEST checkpoint
-    view_rollout("ckpt_Phase3_ep15000.pth")
+    view_rollout("ppo_model_Phase4_final.pth")

@@ -112,4 +112,4 @@ def view_rollout(model_path="ppo_curve_agent.pth", num_episodes=5):
 
 if __name__ == "__main__":
     # Ensure you point this to your .pth file
-    view_rollout("ppo_curve_agent.pth", num_episodes=20)
+    view_rollout("ppo_inversion_fix_ep5000.pth", num_episodes=20)

@@ -238,7 +238,7 @@ def train_phase5(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes", type=int, default=15000)
+    parser.add_argument("--episodes", type=int, default=50000)
     parser.add_argument("--load_path", type=str, default="ppo_model_Phase4_final.pth")
     args = parser.parse_args()
     train_phase5(args)

@@ -112,6 +112,7 @@ def train_bc_fast():
     # Training Loop
     try:
         for i in range(1, TOTAL_STEPS + 1):
+            print(f"Training on batch {i}/{TOTAL_STEPS}")
             obs, ahist, target = next(iterator)
             
             # Move to GPU

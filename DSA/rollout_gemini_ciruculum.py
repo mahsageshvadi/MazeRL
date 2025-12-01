@@ -142,4 +142,4 @@ def view_rollout(model_path):
 
 if __name__ == "__main__":
     # Point to your LATEST checkpoint
-    view_rollout("/Users/geshvad/Documents/Projects_New/RL/MazeRL/DSA/ppo_model_Phase5_final.pth")
+    view_rollout("ppo_model_Phase7_final.pth")

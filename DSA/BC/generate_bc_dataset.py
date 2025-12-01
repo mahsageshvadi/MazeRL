@@ -5,7 +5,7 @@ from Curve_Generator_Flexible_For_Ciruculum_learning import CurveMakerFlexible
 from model_and_utils import crop48, get_action_from_vector, ACTIONS_8
 
 # --- CONFIG ---
-TOTAL_SAMPLES = 100000  # Size of dataset
+TOTAL_SAMPLES = 3000  # Size of dataset
 SAMPLES_PER_IMAGE = 50  # Efficiency hack
 SAVE_FILE = "bc_dataset.npz"
 

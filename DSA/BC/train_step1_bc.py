@@ -5,7 +5,7 @@ import numpy as np
 from torch.utils.data import IterableDataset, DataLoader
 from tqdm import tqdm
 
-from Curve_Generator_Flexible_For_Ciruculum_learning import CurveMakerFlexible
+from DSA.Curve_Generator_Flexible_For_Ciruculum_learning import CurveMakerFlexible
 from model_and_utils import RobustActorCritic, crop48, get_action_from_vector, ACTIONS_8, DEVICE, CROP_SIZE
 
 class InfiniteCurveDataset(IterableDataset):

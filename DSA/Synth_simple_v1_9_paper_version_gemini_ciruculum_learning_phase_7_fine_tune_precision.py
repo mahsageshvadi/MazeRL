@@ -403,7 +403,7 @@ def train_phase7(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes", type=int, default=10000)
+    parser.add_argument("--episodes", type=int, default=20000)
     # Load your Phase 6 or Phase 5 model
     parser.add_argument("--load_path", type=str, default="ppo_model_Phase7_Final.pth")
     args = parser.parse_args()

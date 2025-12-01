@@ -4,16 +4,18 @@ import matplotlib.pyplot as plt
 import random
 from scipy.interpolate import splprep, splev
 
-# Import your classes
 try:
     from Curve_Generator_Flexible_For_Ciruculum_learning import CurveMakerFlexible
 except ImportError:
     print("Error: Generator file not found")
     exit()
 
-from Synth_simple_v1_9_paper_version_gemini import AsymmetricActorCritic, fixed_window_history, ACTIONS_8, DEVICE, crop32, CurveEpisode, clamp, STEP_ALPHA
+# Import your Phase 7 setup specifically to ensure compatibility
+from Synth_simple_v1_9_paper_version_gemini_ciruculum_learning_phase_7_fine_tune_precision import (
+    AsymmetricActorCritic, fixed_window_history, ACTIONS_8, DEVICE, 
+    crop32, CurveEpisode, clamp, STEP_ALPHA
+)
 
-# --- CUSTOM ENV FOR VISUALIZATION ---
 class CurveEnvVisualizer:
     def __init__(self, h=128, w=128):
         self.h, self.w = h, w
@@ -21,7 +23,7 @@ class CurveEnvVisualizer:
         self.max_steps = 400
 
     def reset(self, width_range, noise_prob, invert_prob, min_intensity):
-        # Force params
+        # 1. Generate Curve
         img, mask, pts_all = self.cm.sample_curve(
             width_range=width_range, 
             noise_prob=noise_prob, 
@@ -30,14 +32,27 @@ class CurveEnvVisualizer:
         )
         gt_poly = pts_all[0].astype(np.float32)
 
-        self.gt_map = np.zeros_like(img)
-        # ... (GT map setup) ...
+        # 2. Setup Episode
+        self.gt_map = np.zeros_like(img) # Not strictly needed for actor, but good practice
+        self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly)
 
-        p0 = gt_poly[0].astype(int)
-        self.ep = CurveEpisode(img=img, mask=mask, gt_poly=gt_poly, start=(p0[0], p0[1])) # Fixed missing init_dir
-
+        # 3. ROBUST START STRATEGY
+        # Instead of placing agent exactly at [0] with no history,
+        # we calculate the vector from [0] to [1] to simulate "looking forward"
+        p0 = gt_poly[0]
+        p1 = gt_poly[min(4, len(gt_poly)-1)] # Look a few pixels ahead
+        
         self.agent = (float(p0[0]), float(p0[1]))
-        self.history_pos = [self.agent] * 3 
+        
+        # Calculate a "Ghost" history point behind the start
+        # This helps the LSTM understand the initial orientation
+        vec_y = p0[0] - p1[0]
+        vec_x = p0[1] - p1[1]
+        p_minus_1 = (p0[0] + vec_y, p0[1] + vec_x) # Simulate a point "behind" us
+
+        # Initialize history with this orientation
+        self.history_pos = [p_minus_1, self.agent, self.agent] 
+        
         self.steps = 0
         self.path_mask = np.zeros_like(mask, dtype=np.float32)
         self.path_points = [self.agent]
@@ -49,13 +64,14 @@ class CurveEnvVisualizer:
         curr = self.history_pos[-1]
         p1 = self.history_pos[-2]
         p2 = self.history_pos[-3]
-        # Use the SMART PADDING crop
+        
         ch0 = crop32(self.ep.img, int(curr[0]), int(curr[1]))
         ch1 = crop32(self.ep.img, int(p1[0]), int(p1[1]))
         ch2 = crop32(self.ep.img, int(p2[0]), int(p2[1]))
         ch3 = crop32(self.path_mask, int(curr[0]), int(curr[1]))
         
         actor_obs = np.stack([ch0, ch1, ch2, ch3], axis=0).astype(np.float32)
+        # Dummy critic input
         gt_dummy = np.zeros((1, 33, 33), dtype=np.float32)
         return {"actor": actor_obs, "critic_gt": gt_dummy}
 
@@ -91,20 +107,28 @@ def view_rollout(model_path):
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.eval()
     
-    # Test specifically the hard cases
+    # NOTE: Matched parameters to Phase 7 Training
+    # We increased width range to (2, 6) and reduced noise to 0.8 to match training
     scenarios = [
-        {"name": "Noisy & Low Contrast",  "inv": 0.0, "noise": 1.0},
-        {"name": "Inverted & Noisy",      "inv": 1.0, "noise": 1.0},
-        {"name": "Noisy & Low Contrast",  "inv": 0.0, "noise": 1.0},
-        {"name": "Inverted & Noisy",      "inv": 1.0, "noise": 1.0},
+        {"name": "Standard (Clean)",       "inv": 0.0, "noise": 0.0},
+        {"name": "Hard (Noise+Contrast)",  "inv": 0.0, "noise": 0.8},
+        {"name": "Inverted (Standard)",    "inv": 1.0, "noise": 0.0},
+        {"name": "Inverted (Hard)",        "inv": 1.0, "noise": 0.8},
     ]
     
     plt.figure(figsize=(15, 10))
     
     for i, scen in enumerate(scenarios):
         env = CurveEnvVisualizer(h=128, w=128)
-        # Use Phase 3 Difficulty: Width 2-10, Low Intensity 0.15
-        obs_dict = env.reset(width_range=(1,3), noise_prob=scen['noise'], invert_prob=scen['inv'], min_intensity=0.15)
+        
+        # --- FIX: Match Training Parameters ---
+        # width=(2,6), noise=0.8, intensity=0.2
+        obs_dict = env.reset(
+            width_range=(2, 6), 
+            noise_prob=scen['noise'], 
+            invert_prob=scen['inv'], 
+            min_intensity=0.2
+        )
         
         ahist = []; done = False
         while not done:
@@ -115,6 +139,7 @@ def view_rollout(model_path):
 
             with torch.no_grad():
                 logits, _, _, _ = model(obs_a, gt_dummy, A_t)
+                # Greedy action for testing
                 action = torch.argmax(logits, dim=1).item()
 
             obs_dict, _, done, info = env.step(action)
@@ -136,10 +161,9 @@ def view_rollout(model_path):
         plt.legend()
 
     plt.tight_layout()
-    plt.savefig("final_phase3_test.png")
-    print("Saved final_phase3_test.png")
+    plt.savefig("final_test_result.png")
+    print("Saved final_test_result.png")
     plt.show()
 
 if __name__ == "__main__":
-    # Point to your LATEST checkpoint
-    view_rollout("ppo_model_Phase7_final.pth")
+    view_rollout("ppo_model_Phase7_Final.pth")

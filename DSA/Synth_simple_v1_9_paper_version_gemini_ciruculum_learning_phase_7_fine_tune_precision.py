@@ -139,19 +139,12 @@ class CurveEnvPrecision:
         self.steps += 1
         
         # --- FEATURE 1: PERTURBATION (RECOVERY TRAINING) ---
-        # 5% chance to be pushed off-track.
-        # This breaks momentum and forces the agent to look at the image to recover.
         if np.random.rand() < 0.05:
-            # Random push of 2.0 to 3.5 pixels
             perturb = np.random.randn(2)
             perturb = perturb / (np.linalg.norm(perturb) + 1e-8) * np.random.uniform(2.0, 3.5)
-            
             ny = clamp(self.agent[0] + perturb[0], 0, self.h-1)
             nx = clamp(self.agent[1] + perturb[1], 0, self.w-1)
             self.agent = (ny, nx)
-            # Note: We do NOT update history_pos immediately here. 
-            # We want the history to show where we *were*, and the current position 
-            # to be suddenly different, forcing the agent to react.
 
         # Normal Move
         dy, dx = ACTIONS_8[a_idx]
@@ -170,28 +163,21 @@ class CurveEnvPrecision:
         progress_delta = best_idx - self.prev_idx
         
         # --- FEATURE 2: TIGHTER GAUSSIAN REWARD ---
-        # sigma=1.0 (was 2.0). 
-        # L_t=0 -> reward=1.0 | L_t=2 -> reward=0.13 | L_t=3 -> reward=0.01
-        # This penalizes deviation heavily.
         sigma = 1.0
         precision_score = np.exp(-(L_t**2) / (2 * sigma**2))
         
-        # Base Distance Improvement Reward
         if L_t < self.L_prev:
             r = np.log(EPSILON + dist_diff)
         else:
             r = -np.log(EPSILON + dist_diff)
         r = float(np.clip(r, -2.0, 2.0))
 
-        # Add Precision Score
         if progress_delta > 0:
-            r += precision_score * 2.0 # Increased weight
+            r += precision_score * 2.0
         elif progress_delta <= 0:
             r -= 0.1
 
         # --- FEATURE 3: ALIGNMENT BONUS ---
-        # Reward moving PARALLEL to the ground truth vector
-        # Look ahead 4 points to get stable tangent
         lookahead_idx = min(best_idx + 4, len(self.ep.gt_poly) - 1)
         gt_vec = self.ep.gt_poly[lookahead_idx] - self.ep.gt_poly[best_idx]
         act_vec = np.array([dy, dx])
@@ -200,17 +186,14 @@ class CurveEnvPrecision:
         norm_act = np.linalg.norm(act_vec)
         
         if norm_gt > 1e-6 and norm_act > 1e-6:
-            # Cosine similarity
             cos_sim = np.dot(gt_vec, act_vec) / (norm_gt * norm_act)
-            # If aligned (cos_sim > 0), give bonus. 
             if cos_sim > 0:
                 r += cos_sim * 0.5 
 
-        # Smoothness penalty
         if self.prev_action != -1 and self.prev_action != a_idx:
             r -= 0.05 
         self.prev_action = a_idx
-        r -= 0.05 # Time penalty
+        r -= 0.05
 
         self.L_prev = L_t
         self.prev_idx = max(self.prev_idx, best_idx)
@@ -231,7 +214,7 @@ class CurveEnvPrecision:
         info = {"reached_end": reached_end}
         return self.obs(), r, done, info
 
-# ---------- MODEL (Same as before) ----------
+# ---------- MODEL ----------
 def gn(c): return nn.GroupNorm(4, c)
 
 class AsymmetricActorCritic(nn.Module):
@@ -318,7 +301,6 @@ def train_phase7(args):
     K = 8; nA = len(ACTIONS_8)
     model = AsymmetricActorCritic(n_actions=nA, K=K).to(DEVICE)
     
-    # LOAD BEST PREVIOUS MODEL (Phase 6 or 5)
     try:
         model.load_state_dict(torch.load(args.load_path, map_location=DEVICE))
         print(f"Loaded: {args.load_path}")
@@ -326,11 +308,11 @@ def train_phase7(args):
         print("ERROR: Load path invalid.")
         return
 
-    # Use a small LR for fine-tuning
     opt = torch.optim.Adam(model.parameters(), lr=1e-5)
     
     batch_buffer = []
     ep_returns = []
+    ep_successes = [] # Track success rate
     
     for ep in range(1, args.episodes + 1):
         obs_dict = env.reset()
@@ -364,6 +346,9 @@ def train_phase7(args):
             a_onehot = np.zeros(nA); a_onehot[action] = 1.0
             ahist.append(a_onehot)
             obs_dict = next_obs
+        
+        # Track success based on info from the last step
+        ep_successes.append(1 if info['reached_end'] else 0)
 
         # Batching
         if len(ep_traj["rew"]) > 2:
@@ -393,7 +378,8 @@ def train_phase7(args):
 
         if ep % 100 == 0:
             avg_r = np.mean(ep_returns[-100:])
-            print(f"[Phase 7] Ep {ep} | Avg Rew: {avg_r:.2f}")
+            success_rate = np.mean(ep_successes[-100:])
+            print(f"[Phase 7] Ep {ep} | Avg Rew: {avg_r:.2f} | Success: {success_rate:.2f}")
 
         if ep % 1000 == 0:
             torch.save(model.state_dict(), f"ckpt_Phase7_ep{ep}.pth")

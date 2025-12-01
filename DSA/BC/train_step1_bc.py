@@ -14,7 +14,7 @@ from model_and_utils import RobustActorCritic, crop48, get_action_from_vector, A
 BATCH_SIZE = 64
 LR = 3e-4
 TOTAL_STEPS = 10000 # How many batches to train on (Total samples = 10000 * 64 = 640,000)
-NUM_WORKERS = 4     # Number of CPU cores to use for generation (Adjust based on your PC)
+NUM_WORKERS = 1    # Number of CPU cores to use for generation (Adjust based on your PC)
 
 class FastInfiniteDataset(IterableDataset):
     def __init__(self, h=128, w=128):

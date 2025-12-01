@@ -1,6 +1,5 @@
 import numpy as np
 import cv2
-import scipy.ndimage
 
 def _rng(seed=None):
     return np.random.default_rng(seed)
@@ -22,7 +21,6 @@ class CurveMakerFlexible:
         return np.array([y, x], dtype=np.float32)
 
     def _generate_bezier_points(self, p0=None, n_samples=1000):
-        """Generates a list of (y,x) points forming a smooth bezier curve."""
         if p0 is None:
             p0 = self._random_point(margin=10)
         
@@ -35,7 +33,6 @@ class CurveMakerFlexible:
         else:
             p3 = np.array([self.h - p0[0], self.w - p0[1]], dtype=np.float32)
 
-        # Control points
         center = (p0 + p3) / 2.0
         spread = np.array([self.h, self.w], dtype=np.float32) * 0.3
         p1 = center + self.rng.normal(0, 1, 2) * spread * 0.6
@@ -43,11 +40,9 @@ class CurveMakerFlexible:
         
         ts = np.linspace(0, 1, n_samples, dtype=np.float32)
         pts = np.stack([_cubic_bezier(p0, p1, p2, p3, t) for t in ts], axis=0)
-        
         return pts
 
     def _draw_aa_curve(self, img, pts, thickness, intensity):
-        # OpenCV draw
         pts_xy = pts[:, ::-1] * 16 
         pts_int = pts_xy.astype(np.int32).reshape((-1, 1, 2))
         canvas = np.zeros((self.h, self.w), dtype=np.uint8)
@@ -56,77 +51,38 @@ class CurveMakerFlexible:
         canvas_float = canvas.astype(np.float32) / 255.0
         img[:] = np.maximum(img, canvas_float * intensity)
 
-    def sample_with_distractors(self, 
-                                width_range=(2, 8), 
-                                noise_prob=1.0, 
-                                invert_prob=0.5,
-                                min_intensity=0.6):
-        """
-        Generates ONE target path and ONE OR MORE distractor paths.
-        CRITICAL: The Target path does NOT have branches here. 
-        This ensures the agent learns 'Object Permanence' (tracking one specific thread)
-        without the ambiguity of valid bifurcations.
-        """
+    def sample_with_distractors(self, width_range=(2, 8), noise_prob=1.0, invert_prob=0.5, min_intensity=0.6):
         img = np.zeros((self.h, self.w), dtype=np.float32)
         mask = np.zeros_like(img)
-        
-        # 1. Determine Appearance
         thickness = self.rng.integers(width_range[0], width_range[1] + 1)
         thickness = max(1, int(thickness))
         intensity = self.rng.uniform(min_intensity, 1.0) 
 
-        # 2. Draw TARGET Path (Simple, single path, NO branches)
         pts_target = self._generate_bezier_points()
         self._draw_aa_curve(img, pts_target, thickness, intensity)
-        self._draw_aa_curve(mask, pts_target, thickness, 1.0) # Target -> Mask
+        self._draw_aa_curve(mask, pts_target, thickness, 1.0)
         
-        # 3. Draw DISTRACTOR Paths (The traps)
-        # These are drawn on the Image, but ignored in the Mask.
-        num_distractors = self.rng.integers(2, 5) # 2 to 4 distractors
-        
+        num_distractors = self.rng.integers(2, 5)
         for _ in range(num_distractors):
-            # Distractors vary in thickness/intensity to confuse the agent
             d_thick = max(1, int(thickness * self.rng.uniform(0.5, 1.5)))
             d_int = self.rng.uniform(min_intensity, 1.0)
-            
-            # STRATEGY 1: Parallel/Kissing Distractors
-            # Seed near target to force overlaps/parallel tracks
             idx = self.rng.integers(0, len(pts_target))
             seed_pt = pts_target[idx]
-            jitter = self.rng.normal(0, 10, 2) # Close (10px) jitter
+            jitter = self.rng.normal(0, 10, 2)
             p0_d = seed_pt + jitter
-            
-            # STRATEGY 2: Crossing Distractors (Random points)
-            if self.rng.random() < 0.5:
-                p0_d = None # Generate completely random start
-            
+            if self.rng.random() < 0.5: p0_d = None
             pts_distractor = self._generate_bezier_points(p0=p0_d)
-            
             self._draw_aa_curve(img, pts_distractor, d_thick, d_int)
 
-        # 4. Apply Noise / Inversion
-        if self.rng.random() < noise_prob:
-            self._apply_dsa_noise(img)
-            
-        if self.rng.random() < invert_prob:
-            img = 1.0 - img
-
+        if self.rng.random() < noise_prob: self._apply_dsa_noise(img)
+        if self.rng.random() < invert_prob: img = 1.0 - img
         img = np.clip(img, 0.0, 1.0)
         mask = (mask > 0.1).astype(np.uint8)
-
-        # Return target points only. The agent must ignore the distractors.
         return img, mask, [pts_target]
 
-    def sample_curve(self, 
-                     width_range=(2, 2),    
-                     noise_prob=0.0,        
-                     invert_prob=0.0,
-                     min_intensity=0.6,
-                     branches=False):       
-        
+    def sample_curve(self, width_range=(2, 2), noise_prob=0.0, invert_prob=0.0, min_intensity=0.6, branches=False):       
         img = np.zeros((self.h, self.w), dtype=np.float32)
         mask = np.zeros_like(img) 
-        
         thickness = self.rng.integers(width_range[0], width_range[1] + 1)
         thickness = max(1, int(thickness))
         intensity = self.rng.uniform(min_intensity, 1.0)
@@ -147,15 +103,10 @@ class CurveMakerFlexible:
                 self._draw_aa_curve(mask, pts_branch, b_thick, 1.0)
                 pts_all.append(pts_branch)
 
-        if self.rng.random() < noise_prob:
-            self._apply_dsa_noise(img)
-
-        if self.rng.random() < invert_prob:
-            img = 1.0 - img
-
+        if self.rng.random() < noise_prob: self._apply_dsa_noise(img)
+        if self.rng.random() < invert_prob: img = 1.0 - img
         img = np.clip(img, 0.0, 1.0)
         mask = (mask > 0.1).astype(np.uint8)
-
         return img, mask, pts_all
 
     def _apply_dsa_noise(self, img):
@@ -169,12 +120,12 @@ class CurveMakerFlexible:
             blob_int = self.rng.uniform(0.05, 0.2)
             img[:] = np.maximum(img, blob * blob_int)
 
-        # Gaussian Static
         noise_level = self.rng.uniform(0.05, 0.15)
         noise = self.rng.normal(0, noise_level, img.shape)
         img[:] += noise
 
-        # Gaussian Blur
+        # SPEED OPTIMIZATION: Use OpenCV instead of Scipy
         if self.rng.random() < 0.5:
             sigma = self.rng.uniform(0.5, 1.0)
-            img[:] = scipy.ndimage.gaussian_filter(img, sigma=sigma)
+            ksize = int(sigma * 3) | 1 # Ensure odd
+            img[:] = cv2.GaussianBlur(img, (ksize, ksize), sigma)

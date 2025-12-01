@@ -22,7 +22,7 @@ class CurveEnvVisualizer:
 
     def reset(self, width_range, noise_prob, invert_prob, min_intensity):
         # Force params
-        img, mask, pts_all = self.cm.sample_with_distractors(
+        img, mask, pts_all = self.cm.sample_curve(
             width_range=width_range, 
             noise_prob=noise_prob, 
             invert_prob=invert_prob,
@@ -142,4 +142,4 @@ def view_rollout(model_path):
 
 if __name__ == "__main__":
     # Point to your LATEST checkpoint
-    view_rollout("ppo_model_Phase5_final.pth")
+    view_rollout("/Users/geshvad/Documents/Projects_New/RL/MazeRL/DSA/ppo_model_Phase5_final.pth")

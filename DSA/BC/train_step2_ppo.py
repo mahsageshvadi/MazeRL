@@ -341,7 +341,7 @@ def train_rl(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes", type=int, default=10000, help="Number of PPO episodes")
+    parser.add_argument("--episodes", type=int, default=100000, help="Number of PPO episodes")
     parser.add_argument("--load_path", type=str, default="bc_pretrained_model.pth", help="Path to BC weights")
     args = parser.parse_args()
     

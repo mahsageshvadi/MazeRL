@@ -166,4 +166,4 @@ def view_rollout(model_path):
     plt.show()
 
 if __name__ == "__main__":
-    view_rollout("ppo_model_Phase8_Realism.pth")
+    view_rollout("DSA/ppo_model_Phase8_Realism.pth")

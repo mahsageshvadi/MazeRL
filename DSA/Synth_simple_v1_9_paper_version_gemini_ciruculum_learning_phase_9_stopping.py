@@ -339,7 +339,7 @@ def train_stopping(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes", type=int, default=10000)
+    parser.add_argument("--episodes", type=int, default=50000)
     parser.add_argument("--load_path", type=str, default="ppo_model_Phase8_Realism.pth")
     args = parser.parse_args()
     train_stopping(args)

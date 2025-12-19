@@ -386,7 +386,7 @@ def run_unified_training():
         # Auto-complete enabled. Clean images. Running start.
         {
             'name': 'Stage1_Bootstrap',
-            'episodes': 8000,
+            'episodes': 16000,
             'lr': 1e-4,
             'config': {
                 'stage_id': 1, 'width': (2, 4), 'noise': 0.0, 
@@ -397,7 +397,7 @@ def run_unified_training():
         # Noise enabled. Mixed starts (Cold/Running). STRICT STOP enabled (must press button).
         {
             'name': 'Stage2_Robustness',
-            'episodes': 12000,
+            'episodes': 24000,
             'lr': 5e-5,
             'config': {
                 'stage_id': 2, 'width': (2, 8), 'noise': 0.5, 
@@ -408,7 +408,7 @@ def run_unified_training():
         # Tissue enabled. Full difficulty.
         {
             'name': 'Stage3_Realism',
-            'episodes': 15000,
+            'episodes': 30000,
             'lr': 1e-5,
             'config': {
                 'stage_id': 3, 'width': (1, 10), 'noise': 0.8, 

@@ -397,7 +397,7 @@ def run_unified_training():
         # Noise enabled. Mixed starts (Cold/Running). STRICT STOP enabled (must press button).
         {
             'name': 'Stage2_Robustness',
-            'episodes': 24000,
+            'episodes': 20000,
             'lr': 5e-5,
             'config': {
                 'stage_id': 2, 'width': (2, 8), 'noise': 0.5, 
@@ -406,7 +406,7 @@ def run_unified_training():
         },
         # Stage 3: Realism (Mastery)
         # Tissue enabled. Full difficulty.
-        {
+    """    {
             'name': 'Stage3_Realism',
             'episodes': 30000,
             'lr': 1e-5,
@@ -414,8 +414,8 @@ def run_unified_training():
                 'stage_id': 3, 'width': (1, 10), 'noise': 0.8, 
                 'tissue': True, 'strict_stop': True, 'mixed_start': True
             }
-        }
-    ]
+        } """ 
+    ]  
 
     # Initialize
     env = CurveEnvUnified(h=128, w=128)

@@ -386,7 +386,7 @@ def run_unified_training():
         # Auto-complete enabled. Clean images. Running start.
         {
             'name': 'Stage1_Bootstrap',
-            'episodes': 16000,
+            'episodes': 8000,
             'lr': 1e-4,
             'config': {
                 'stage_id': 1, 'width': (2, 4), 'noise': 0.0, 
@@ -397,7 +397,7 @@ def run_unified_training():
         # Noise enabled. Mixed starts (Cold/Running). STRICT STOP enabled (must press button).
         {
             'name': 'Stage2_Robustness',
-            'episodes': 20000,
+            'episodes': 12000,
             'lr': 5e-5,
             'config': {
                 'stage_id': 2, 'width': (2, 8), 'noise': 0.5, 
@@ -406,16 +406,16 @@ def run_unified_training():
         },
         # Stage 3: Realism (Mastery)
         # Tissue enabled. Full difficulty.
-    """    {
+        {
             'name': 'Stage3_Realism',
-            'episodes': 30000,
+            'episodes': 15000,
             'lr': 1e-5,
             'config': {
                 'stage_id': 3, 'width': (1, 10), 'noise': 0.8, 
                 'tissue': True, 'strict_stop': True, 'mixed_start': True
             }
-        } """ 
-    ]  
+        }
+    ]
 
     # Initialize
     env = CurveEnvUnified(h=128, w=128)

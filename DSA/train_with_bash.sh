@@ -29,7 +29,7 @@ for CONF in "${CONFIGS[@]}"; do
     echo "===================================================="
     
     # Run trainer and save terminal output to log file
-    python3 train_generalist.py \
+    python3 Synth_simple_v1_9_paper_version_gemini_ciruculum_learning_with_bash_script.py \
         --run_name "$NAME" \
         --out_dir "$RUN_DIR" \
         --eps_per_stage "$EPS" \

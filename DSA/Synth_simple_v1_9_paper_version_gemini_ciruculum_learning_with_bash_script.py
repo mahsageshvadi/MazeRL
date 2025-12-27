@@ -168,7 +168,7 @@ def run():
                 
                 loss = -dist.log_prob(m_idx)*advantage.detach() + \
                        F.binary_cross_entropy(s_prob, torch.tensor([[target_s]], device=DEVICE)) + \
-                       0.5 * F.mse_loss(val, rew + (0.99 * next_v.detach() if not done else 0))
+                       0.5 * F.mse_loss(val, torch.tensor(rew + (0.99 * next_v.detach() if not done else 0), device=DEVICE, dtype=torch.float32))
                 
                 opt.zero_grad(); loss.backward(); opt.step()
                 h = (h[0].detach(), h[1].detach()); ep_r += rew

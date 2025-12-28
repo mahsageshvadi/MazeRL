@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OUTDIR="runs"
+OUTDIR="runs_gpt_version"
 TOTAL_STEPS=1200000
 ROLLOUT=4096
 DEVICE="cuda"

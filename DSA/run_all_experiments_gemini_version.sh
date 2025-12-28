@@ -8,7 +8,7 @@ PYTHON_EXEC="/home/mahsa.geshvadi001/anaconda3/envs/RL/bin/python"
 # PYTHON_EXEC=$(which python)
 
 # Create logs directory
-mkdir -p runs
+mkdir -p runs_gemini_version
 
 echo "Using Python: $PYTHON_EXEC"
 echo "Starting Experiments..."
@@ -19,7 +19,7 @@ nohup $PYTHON_EXEC -u train_rl_DSA_gemini_version.py \
   --align_weight 2.0 \
   --smooth_weight 0.2 \
   --gpu_id 0 \
-  > runs/baseline.log 2>&1 &
+  > runs_gemini_version/baseline.log 2>&1 &
 
 echo "Launched Baseline (PID $!)"
 
@@ -29,7 +29,7 @@ nohup $PYTHON_EXEC -u train_rl_DSA_gemini_version.py \
   --align_weight 4.0 \
   --smooth_weight 0.2 \
   --gpu_id 0 \
-  > runs/high_align.log 2>&1 &
+  > runs_gemini_version/high_align.log 2>&1 &
 
 echo "Launched High Alignment (PID $!)"
 
@@ -40,7 +40,7 @@ nohup $PYTHON_EXEC -u train_rl_DSA_gemini_version.py \
   --smooth_weight 0.2 \
   --hidden_size 256 \
   --gpu_id 0 \
-  > runs/high_capacity.log 2>&1 &
+  > runs_gemini_version/high_capacity.log 2>&1 &
 
 echo "Launched High Capacity (PID $!)"
 

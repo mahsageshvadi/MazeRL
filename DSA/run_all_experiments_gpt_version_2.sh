@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OUT=runs
+OUT=runs_gpt_version_2
 DEVICE=cuda
 TOTAL=1200000
 ROLLOUT=4096

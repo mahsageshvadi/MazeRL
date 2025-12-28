@@ -802,10 +802,12 @@ def main():
     curr_ep_off = 0
 
     while env_steps < cfg.total_steps:
-        buf = RolloutBuffer(cfg.rollout_steps, obs_shape=(4, cfg.crop, cfg.crop))
+        remaining_steps = cfg.total_steps - env_steps
+        rollout_steps = min(cfg.rollout_steps, remaining_steps)
+        buf = RolloutBuffer(rollout_steps, obs_shape=(4, cfg.crop, cfg.crop))
 
         # rollout
-        for t in range(cfg.rollout_steps):
+        for t in range(rollout_steps):
             aobs = torch.tensor(obs["actor"][None, ...], device=device)
             cgt = torch.tensor(obs["critic_gt"][None, ...], device=device)
             with torch.no_grad():

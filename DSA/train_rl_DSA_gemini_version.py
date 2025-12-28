@@ -15,7 +15,7 @@ import datetime
 try:
     from Curve_Generator_Flexible_For_Ciruculum_learning import CurveMakerFlexible
 except ImportError:
-    print("Error: Generator file not found.")
+    print("CRITICAL ERROR: 'Curve_Generator_Flexible_For_Ciruculum_learning.py' not found.")
     exit()
 
 # ---------- ARGS & CONFIG ----------
@@ -40,7 +40,6 @@ CROP = 33
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 
-# ... [Helper Functions: clamp, crop32, get_closest_point_info remain the same] ...
 def clamp(v, lo, hi): return max(lo, min(v, hi))
 def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
     h, w = img.shape
@@ -50,7 +49,7 @@ def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
     r = size // 2
     y0, y1 = cy - r, cy + r + 1
     x0, x1 = cx - r, cx + r + 1
-    out = np.full((size, size), pad_val, dtype=img.dtype)
+    out = np.full((size, size), pad_val, dtype=np.float32) # Explicit float32
     sy0, sy1 = clamp(y0, 0, h), clamp(y1, 0, h)
     sx0, sx1 = clamp(x0, 0, w), clamp(x1, 0, w)
     oy0, ox0 = sy0 - y0, sx0 - x0
@@ -83,12 +82,16 @@ class CurveEnvRefined:
         self.config.update(cfg)
 
     def reset(self):
-        if self.config['distractors']:
-            img, _, pts_all = self.cm.sample_with_distractors(width_range=self.config['width'], noise_prob=self.config['noise'], invert_prob=self.config['invert'])
-            gt_poly = pts_all[0].astype(np.float32)
-        else:
-            img, _, pts_all = self.cm.sample_curve(width_range=self.config['width'], noise_prob=self.config['noise'], invert_prob=self.config['invert'])
-            gt_poly = pts_all[0].astype(np.float32)
+        try:
+            if self.config['distractors']:
+                img, _, pts_all = self.cm.sample_with_distractors(width_range=self.config['width'], noise_prob=self.config['noise'], invert_prob=self.config['invert'])
+                gt_poly = pts_all[0].astype(np.float32)
+            else:
+                img, _, pts_all = self.cm.sample_curve(width_range=self.config['width'], noise_prob=self.config['noise'], invert_prob=self.config['invert'])
+                gt_poly = pts_all[0].astype(np.float32)
+        except Exception as e:
+            print(f"Generator Error: {e}. Retrying...")
+            return self.reset()
 
         if self.config['tissue']:
             noise = np.random.randn(self.h, self.w)
@@ -98,7 +101,7 @@ class CurveEnvRefined:
             if is_white_bg: img = np.clip(img - tissue, 0.0, 1.0)
             else: img = np.clip(img + tissue, 0.0, 1.0)
 
-        self.ep = CurveEpisode(img=img, gt_poly=gt_poly)
+        self.ep = CurveEpisode(img=img.astype(np.float32), gt_poly=gt_poly)
         poly_len = len(gt_poly)
         
         if self.config['stopping_training']:
@@ -113,7 +116,7 @@ class CurveEnvRefined:
             self.history_pos = [self.agent] * 3
 
         self.steps = 0
-        self.path_mask = np.zeros_like(img)
+        self.path_mask = np.zeros_like(img, dtype=np.float32)
         self.path_mask[int(self.agent[0]), int(self.agent[1])] = 1.0
         self.dist_to_line, self.closest_idx = get_closest_point_info(self.agent, gt_poly)
         self.prev_idx = self.closest_idx
@@ -157,7 +160,6 @@ class CurveEnvRefined:
         progress = new_idx - self.prev_idx
         r_prog = 1.5 if progress > 0 else -0.5
 
-        # --- ALIGNMENT REWARD (TUNABLE) ---
         gt_len = len(self.ep.gt_poly)
         lookahead = min(new_idx + 4, gt_len - 1)
         gt_vec = self.ep.gt_poly[lookahead] - self.ep.gt_poly[new_idx]
@@ -167,7 +169,6 @@ class CurveEnvRefined:
         cosine = np.dot(gt_vec, action_vec) / (gt_norm * action_norm)
         r_align = cosine * args.align_weight 
 
-        # --- SMOOTHNESS PENALTY (TUNABLE) ---
         r_smooth = 0.0
         if self.prev_action != -1 and self.prev_action != action:
             r_smooth = -args.smooth_weight
@@ -208,9 +209,10 @@ class ActorCriticSmooth(nn.Module):
 
 # ---------- TRAINING ----------
 def train():
-    log_dir = os.path.join("runs", f"{datetime.datetime.now().strftime('%m%d')}_{args.exp_name}")
+    log_dir = os.path.join("runs_gemini_version", f"{datetime.datetime.now().strftime('%m%d')}_{args.exp_name}")
+    os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
-    print(f"Logging to {log_dir}")
+    print(f"Logging to {log_dir}. Model checkpoints will be saved here.")
 
     env = CurveEnvRefined()
     model = ActorCriticSmooth(hidden_size=args.hidden_size).to(DEVICE)
@@ -236,8 +238,9 @@ def train():
             info_success = False
             
             while not done:
-                img_t = torch.tensor(obs['img'][None], device=DEVICE)
-                vec_t = torch.tensor(obs['vec'][None], device=DEVICE)
+                img_t = torch.tensor(obs['img'][None], device=DEVICE, dtype=torch.float32) # Ensure Float
+                vec_t = torch.tensor(obs['vec'][None], device=DEVICE, dtype=torch.float32) # Ensure Float
+                
                 logits, val, lstm_h = model(img_t, vec_t, lstm_h)
                 dist = Categorical(logits=logits)
                 action = dist.sample()
@@ -249,16 +252,22 @@ def train():
                 rewards.append(r)
                 obs = next_obs
 
-            # PPO-Lite Update
+            # --- THE FIX IS HERE: FORCE FLOAT32 ---
             returns = []
             R = 0
             for r in reversed(rewards):
                 R = r + args.gamma * R
                 returns.insert(0, R)
-            returns = torch.tensor(returns, device=DEVICE)
+            
+            # EXPLICITLY CAST TO FLOAT32 TO FIX THE DOUBLE/FLOAT ERROR
+            returns = torch.tensor(returns, device=DEVICE, dtype=torch.float32)
+            
             values = torch.cat(values).squeeze()
             log_probs = torch.cat(log_probs)
+            
+            # Detach values to prevent gradient flow back through critic into actor via advantage
             advantage = returns - values.detach()
+            
             actor_loss = -(log_probs * advantage).mean()
             critic_loss = F.mse_loss(values, returns)
             loss = actor_loss + 0.5 * critic_loss
@@ -269,11 +278,20 @@ def train():
             opt.step()
             
             total_ep += 1
-            # Logging
+            
             if total_ep % 10 == 0:
                 writer.add_scalar("Reward/Episode", sum(rewards), total_ep)
                 writer.add_scalar("Loss/Total", loss.item(), total_ep)
                 writer.add_scalar("Metric/Success", 1.0 if info_success else 0.0, total_ep)
+                if total_ep % 100 == 0:
+                    print(f"Ep {total_ep} ({phase['name']}) | Reward: {sum(rewards):.2f} | Success: {info_success}")
+
+            if total_ep % 500 == 0:
+                save_path = f"{log_dir}/model_{total_ep}.pth"
+                torch.save(model.state_dict(), save_path)
+                print(f"Saved checkpoint: {save_path}")
+
+        torch.save(model.state_dict(), f"{log_dir}/model_phase_{phase['name']}.pth")
 
     torch.save(model.state_dict(), f"{log_dir}/model_final.pth")
     writer.close()

@@ -8,7 +8,7 @@ ROLLOUT=4096
 SEEDS=(0 1 2)
 
 for S in "${SEEDS[@]}"; do
-  python train_versionB_termhead.py \
+  python train_rl_dsa_GPT_version_2.py\
     --exp_name "B_termhead_s${S}" \
     --out_dir "${OUT}" \
     --seed "${S}" \

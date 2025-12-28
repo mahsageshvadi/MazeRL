@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OUT=runs_gpt_version_2
-DEVICE=cuda
+OUT="runs_gpt_version_2"
+DEVICE="cuda"
 TOTAL=1200000
 ROLLOUT=4096
 SEEDS=(0 1 2)
 
+mkdir -p "${OUT}"
+
 for S in "${SEEDS[@]}"; do
-  python train_rl_dsa_GPT_version_2.py\
-    --exp_name "B_termhead_s${S}" \
+  EXP="B_termhead_s${S}"
+  echo "=============================="
+  echo "Running ${EXP}"
+  echo "=============================="
+
+  python train_rl_dsa_GPT_version_2.py \
+    --exp_name "${EXP}" \
     --out_dir "${OUT}" \
     --seed "${S}" \
     --device "${DEVICE}" \
@@ -21,5 +28,8 @@ for S in "${SEEDS[@]}"; do
     --stop_coef 1.5
 done
 
-echo "Done. TensorBoard:"
+echo "================================"
+echo "All runs finished ✅"
+echo "TensorBoard:"
 echo "tensorboard --logdir ${OUT}"
+echo "================================"

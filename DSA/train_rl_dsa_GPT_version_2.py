@@ -456,6 +456,12 @@ def train(cfg: Cfg):
             act = dist.sample()
             logp = dist.log_prob(act)
 
+            # ---- PPO RULE: rollout tensors MUST be detached ----
+            logp = logp.detach()
+            val = val.detach()
+            stop_logit = stop_logit.detach()
+
+
             obs2, r, done, info = env.step(int(act.item()))
 
             stop_target = torch.tensor(info["stop_target"], device=device, dtype=torch.float32)
@@ -495,6 +501,11 @@ def train(cfg: Cfg):
         # -------- Compute advantages --------
         adv, ret = compute_gae(buf.rew, buf.val, buf.done, cfg.gamma, cfg.gae_lambda)
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+
+        # ---- PPO targets must not carry gradients ----
+        adv = adv.detach()
+        ret = ret.detach()
+
 
         # -------- PPO updates --------
         idxs = np.arange(buf.T)

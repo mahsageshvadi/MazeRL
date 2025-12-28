@@ -18,7 +18,7 @@ for SEED in "${SEEDS[@]}"; do
   for TURN in "${WTURN[@]}"; do
     for ALIGN in "${WALIGN[@]}"; do
       EXP="A_stopaction_s${SEED}_turn${TURN}_align${ALIGN}"
-      python train_rl_dsa.py \
+      python train_rl_dsa_GPT_version.py \
         --exp_name "${EXP}" \
         --out_dir "${OUTDIR}" \
         --seed "${SEED}" \
@@ -42,7 +42,7 @@ for SEED in "${SEEDS[@]}"; do
   for TURN in "${WTURN[@]}"; do
     for ALIGN in "${WALIGN[@]}"; do
       EXP="B_termhead_s${SEED}_turn${TURN}_align${ALIGN}"
-      python train_rl_dsa.py \
+      python train_rl_dsa_GPT_version.py \
         --exp_name "${EXP}" \
         --out_dir "${OUTDIR}" \
         --seed "${SEED}" \

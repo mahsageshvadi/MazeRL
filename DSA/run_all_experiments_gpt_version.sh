@@ -31,7 +31,7 @@ for SEED in "${SEEDS[@]}"; do
 
       echo ">> ${EXP}"
 
-      python train_rl_dsa_A_stopaction.py \
+      python python train_rl_dsa_GPT_version.py --use_stop_action 1 \
         --exp_name "${EXP}" \
         --out_dir "${OUTDIR}" \
         --seed "${SEED}" \
@@ -63,7 +63,7 @@ for SEED in "${SEEDS[@]}"; do
 
       echo ">> ${EXP}"
 
-      python train_rl_dsa_B_termhead.py \
+      python python train_rl_dsa_GPT_version.py --use_stop_action 0 \
         --exp_name "${EXP}" \
         --out_dir "${OUTDIR}" \
         --seed "${SEED}" \

@@ -49,7 +49,7 @@ def crop32(img: np.ndarray, cy: int, cx: int, size=CROP):
     r = size // 2
     y0, y1 = cy - r, cy + r + 1
     x0, x1 = cx - r, cx + r + 1
-    out = np.full((size, size), pad_val, dtype=np.float32) # Explicit float32
+    out = np.full((size, size), pad_val, dtype=np.float32)
     sy0, sy1 = clamp(y0, 0, h), clamp(y1, 0, h)
     sx0, sx1 = clamp(x0, 0, w), clamp(x1, 0, w)
     oy0, ox0 = sy0 - y0, sx0 - x0
@@ -109,15 +109,29 @@ class CurveEnvRefined:
         else:
             start_idx = 5 if poly_len > 10 else 0
 
-        self.agent = tuple(gt_poly[start_idx])
+        # --- FIX: CLAMP START POSITION TO IMAGE BOUNDS ---
+        # This prevents the "Index 133 out of bounds" crash
+        start_pt = gt_poly[start_idx]
+        sy = np.clip(start_pt[0], 0, self.h - 1)
+        sx = np.clip(start_pt[1], 0, self.w - 1)
+        self.agent = (sy, sx)
+
         if start_idx >= 2:
-            self.history_pos = [tuple(gt_poly[start_idx-2]), tuple(gt_poly[start_idx-1]), self.agent]
+            p1 = gt_poly[start_idx-1]
+            p2 = gt_poly[start_idx-2]
+            # Clip history points too just in case
+            p1 = (np.clip(p1[0], 0, self.h-1), np.clip(p1[1], 0, self.w-1))
+            p2 = (np.clip(p2[0], 0, self.h-1), np.clip(p2[1], 0, self.w-1))
+            self.history_pos = [p2, p1, self.agent]
         else:
             self.history_pos = [self.agent] * 3
 
         self.steps = 0
         self.path_mask = np.zeros_like(img, dtype=np.float32)
+        
+        # Now this line is safe because self.agent is clipped
         self.path_mask[int(self.agent[0]), int(self.agent[1])] = 1.0
+        
         self.dist_to_line, self.closest_idx = get_closest_point_info(self.agent, gt_poly)
         self.prev_idx = self.closest_idx
         self.prev_action = -1
@@ -238,8 +252,8 @@ def train():
             info_success = False
             
             while not done:
-                img_t = torch.tensor(obs['img'][None], device=DEVICE, dtype=torch.float32) # Ensure Float
-                vec_t = torch.tensor(obs['vec'][None], device=DEVICE, dtype=torch.float32) # Ensure Float
+                img_t = torch.tensor(obs['img'][None], device=DEVICE, dtype=torch.float32)
+                vec_t = torch.tensor(obs['vec'][None], device=DEVICE, dtype=torch.float32)
                 
                 logits, val, lstm_h = model(img_t, vec_t, lstm_h)
                 dist = Categorical(logits=logits)
@@ -252,22 +266,19 @@ def train():
                 rewards.append(r)
                 obs = next_obs
 
-            # --- THE FIX IS HERE: FORCE FLOAT32 ---
+            # Update
             returns = []
             R = 0
             for r in reversed(rewards):
                 R = r + args.gamma * R
                 returns.insert(0, R)
             
-            # EXPLICITLY CAST TO FLOAT32 TO FIX THE DOUBLE/FLOAT ERROR
+            # Explicit Float32 Cast
             returns = torch.tensor(returns, device=DEVICE, dtype=torch.float32)
-            
             values = torch.cat(values).squeeze()
             log_probs = torch.cat(log_probs)
             
-            # Detach values to prevent gradient flow back through critic into actor via advantage
             advantage = returns - values.detach()
-            
             actor_loss = -(log_probs * advantage).mean()
             critic_loss = F.mse_loss(values, returns)
             loss = actor_loss + 0.5 * critic_loss

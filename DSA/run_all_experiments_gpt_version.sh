@@ -17,7 +17,6 @@ mkdir -p "${OUTDIR}"
 
 ########################################
 # Version A — STOP as explicit action
-# Trainer: train_rl_dsa_A_stopaction.py
 ########################################
 echo "=============================="
 echo "Running Version A (STOP action)"
@@ -28,10 +27,9 @@ for SEED in "${SEEDS[@]}"; do
     for ALIGN in "${WALIGN[@]}"; do
 
       EXP="A_stopaction_s${SEED}_turn${TURN}_align${ALIGN}"
-
       echo ">> ${EXP}"
 
-      python python train_rl_dsa_GPT_version.py --use_stop_action 1 \
+      python train_rl_dsa_GPT_version.py \
         --exp_name "${EXP}" \
         --out_dir "${OUTDIR}" \
         --seed "${SEED}" \
@@ -40,30 +38,28 @@ for SEED in "${SEEDS[@]}"; do
         --w_turn "${TURN}" \
         --w_align "${ALIGN}" \
         --total_steps "${TOTAL_STEPS}" \
-        --rollout_steps "${ROLLOUT}"
+        --rollout_steps "${ROLLOUT}" \
+        --use_stop_action 1
 
     done
   done
 done
 
-
 ########################################
-# Version B — Termination head
-# Trainer: train_rl_dsa_B_termhead.py
+# Version B — NO STOP (implicit termination)
 ########################################
 echo "================================"
-echo "Running Version B (Term head)"
+echo "Running Version B (No STOP action)"
 echo "================================"
 
 for SEED in "${SEEDS[@]}"; do
   for TURN in "${WTURN[@]}"; do
     for ALIGN in "${WALIGN[@]}"; do
 
-      EXP="B_termhead_s${SEED}_turn${TURN}_align${ALIGN}"
-
+      EXP="B_nostop_s${SEED}_turn${TURN}_align${ALIGN}"
       echo ">> ${EXP}"
 
-      python python train_rl_dsa_GPT_version.py --use_stop_action 0 \
+      python train_rl_dsa_GPT_version.py \
         --exp_name "${EXP}" \
         --out_dir "${OUTDIR}" \
         --seed "${SEED}" \
@@ -72,7 +68,8 @@ for SEED in "${SEEDS[@]}"; do
         --w_turn "${TURN}" \
         --w_align "${ALIGN}" \
         --total_steps "${TOTAL_STEPS}" \
-        --rollout_steps "${ROLLOUT}"
+        --rollout_steps "${ROLLOUT}" \
+        --use_stop_action 0
 
     done
   done

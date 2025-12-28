@@ -213,13 +213,32 @@ class ActorCritic(nn.Module):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp_name", type=str, required=True)
+    parser.add_argument("--out_dir", type=str, default="runs_gpt_version")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--step_alpha", type=float, default=1.0)
+    parser.add_argument("--w_turn", type=float, default=0.20)
+    parser.add_argument("--w_align", type=float, default=0.20)
+    parser.add_argument("--total_steps", type=int, default=1200000)
+    parser.add_argument("--rollout_steps", type=int, default=4096)
     parser.add_argument("--use_stop_action", type=int, default=1)
+
     args = parser.parse_args()
 
     cfg = TrainConfig(
         exp_name=args.exp_name,
-        use_stop_action=args.use_stop_action
+        out_dir=args.out_dir,
+        seed=args.seed,
+        device=args.device,
+        step_alpha=args.step_alpha,
+        w_turn=args.w_turn,
+        w_align=args.w_align,
+        total_steps=args.total_steps,
+        rollout_steps=args.rollout_steps,
+        use_stop_action=args.use_stop_action,
     )
+
+    print(f"[MODE] use_stop_action = {cfg.use_stop_action}")
 
     set_seed(cfg.seed)
 

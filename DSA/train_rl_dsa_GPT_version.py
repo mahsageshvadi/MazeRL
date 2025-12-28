@@ -211,11 +211,16 @@ class ActorCritic(nn.Module):
 # ============================================================
 
 def main():
-    args = argparse.ArgumentParser()
-    args.add_argument("--exp_name", default="dsa_rl")
-    args = args.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--exp_name", type=str, required=True)
+    parser.add_argument("--use_stop_action", type=int, default=1)
+    args = parser.parse_args()
 
-    cfg = TrainConfig(exp_name=args.exp_name)
+    cfg = TrainConfig(
+        exp_name=args.exp_name,
+        use_stop_action=args.use_stop_action
+    )
+
     set_seed(cfg.seed)
 
     run_dir = os.path.join(cfg.out_dir, cfg.exp_name)

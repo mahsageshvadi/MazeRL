@@ -9,7 +9,7 @@ for SEED in "${SEEDS[@]}"; do
   echo "=============================="
   echo "Running ${EXP}"
   echo "=============================="
-  python train_rl_dsa_B_termhead_v2.py \
+  python train_rl_dsa_GPT_version_2.py \
     --exp_name "${EXP}" \
     --seed "${SEED}"
 done
